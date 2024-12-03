@@ -387,7 +387,7 @@ class LLMNeedleHaystackTester:
     
     def encode_text_to_tokens(self, text):
         if self.model_provider in ["Mistral", "LLaMA3"]:
-            return self.enc.encode(text)
+            return self.enc.encode(text, add_special_tokens=False)
         elif self.model_provider == "Anthropic":
             # Assuming you have a different encoder for Anthropic
             return self.enc.encode(text).ids
@@ -439,7 +439,7 @@ class LLMNeedleHaystackTester:
 
     def get_context_length_in_tokens(self, context):
         if self.model_provider in ["Mistral", "LLaMA3"]:
-            return len(self.enc.encode(context))
+            return len(self.enc.encode(context, add_special_tokens=False))
         else:
             return len(self.enc.encode(context))
             raise ValueError("model_provider must be either 'OpenAI' or 'Anthropic'")
@@ -456,14 +456,14 @@ class LLMNeedleHaystackTester:
 
     def get_tokens_from_context(self, context):
         if self.model_provider in ["Mistral", "LLaMA3"]:
-            return self.enc.encode(context)
+            return self.enc.encode(context, add_special_tokens=False)
         else:
             return self.enc.encode(context)
             # raise ValueError("model_provider must be either 'OpenAI' or 'Anthropic'")
         
     def decode_tokens(self, tokens, context_length=None):
         if self.model_provider in ["Mistral", "LLaMA3"]:
-            return self.enc.decode(tokens[:context_length])
+            return self.enc.decode(tokens[:context_length], skip_special_tokens=True)
         else:
             return self.enc.decode(tokens[:context_length])
             # raise ValueError("model_provider must be either 'OpenAI' or 'Anthropic'")
