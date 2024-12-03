@@ -1,0 +1,11 @@
+<|start_header_id|>system<|end_header_id|>
+
+You are given some documents, and you need to answer a question based on these documents.
+Your answer should be less than five words.<|eot_id|>
+<|start_header_id|>user<|end_header_id|>
+
+Document: Roman Republic After having declined in size following the subjugation of the Mediterranean, the Roman navy underwent short-term upgrading and revitalisation in the late Republic to meet several new demands. Under Caesar, an invasion fleet was assembled in the English Channel to allow the invasion of Britannia; under Pompey, a large fleet was raised in the Mediterranean Sea to clear the sea of Cilician pirates. During the civil war that followed, as many as a thousand ships were either constructed or pressed into service from Greek cities. 
+Document: North Sea The North Sea is bounded by the Orkney Islands and east coast of Great Britain to the west and the northern and central European mainland to the east and south, including Norway, Denmark, Germany, the Netherlands, Belgium, and France. In the southwest, beyond the Straits of Dover, the North Sea becomes the English Channel connecting to the Atlantic Ocean. In the east, it connects to the Baltic Sea via the Skagerrak and Kattegat, narrow straits that separate Denmark from Norway and Sweden respectively. In the north it is bordered by the Shetland Islands, and connects with the Norwegian Sea, which lies in the very north - eastern part of the Atlantic. 
+Document: Rhine The Rhine (Romansh: Rein, German: Rhein, French: le Rhin, Dutch: Rijn) is a European river that begins in the Swiss canton of Graubünden in the southeastern Swiss Alps, forms part of the Swiss-Austrian, Swiss-Liechtenstein border, Swiss-German and then the Franco-German border, then flows through the Rhineland and eventually empties into the North Sea in the Netherlands. The biggest city on the river Rhine is Cologne, Germany with a population of more than 1,050,000 people. It is the second-longest river in Central and Western Europe (after the Danube), at about 1,230 km (760 mi), with an average discharge of about 2,900 m3/s (100,000 cu ft/s). 
+Question: Who sent naval ships to the body of water that joins the Atlantic and the sea where the Rhine ends?<|eot_id|>
+<|start_header_id|>assistant<|end_header_id|>
