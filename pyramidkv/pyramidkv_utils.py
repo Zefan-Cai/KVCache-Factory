@@ -10,6 +10,21 @@ from typing import List
 from typing import List, Optional, Tuple
 from transformers.cache_utils import Cache
 
+def key_pruner_query_driven(kv_states, q_states, recent_size=128, ratio=0.3):
+    _, _, seqlen, head_dim = kv_states.shape
+    k = int(head_dim * ratio)
+    # new efficient implementation
+    queries_norm = torch.pow(q_states[..., -32:, :], 2).mean(dim=2)
+    keys_norm = torch.pow(kv_states, 2).mean(dim=2)
+    key = queries_norm * keys_norm
+    _, indices = torch.topk(key, k, dim=-1, largest=False)
+    keep_idx = indices.sort().values
+    mask = torch.zeros(key.shape, dtype=torch.bool).to(kv_states.device)
+    mask = mask.scatter_(-1, keep_idx, 1)                   
+    mask_k = mask.unsqueeze(2).expand(-1, -1, seqlen - recent_size, -1)
+
+    return kv_states[:, :, :seqlen - recent_size, :][~mask_k].reshape(1,-1,seqlen - recent_size,head_dim-k), kv_states[:, :, seqlen - recent_size:, :], ~mask
+
 class DynamicCacheSplitHeadFlatten(Cache):
     '''
     adapt from https://github.com/FFY0/AdaKV.
@@ -268,13 +283,15 @@ class PyramidKVCluster():
             return key_states, value_states
 
 class SnapKVCluster():
-    def __init__(self, window_size = 64, max_capacity_prompt = 256 + 64, kernel_size = 5, pooling = 'avgpool', merge = None):
+    def __init__(self, window_size = 64, max_capacity_prompt = 256 + 64, kernel_size = 5, pooling = 'avgpool', merge = None, recent_size = 32, ratio =  0.4):
         self.window_size = window_size
         self.max_capacity_prompt = max_capacity_prompt
         assert self.max_capacity_prompt - self.window_size > 0
         self.kernel_size = kernel_size
         self.pooling = pooling
         self.merge = merge
+        self.recent_size = recent_size
+        self.ratio = ratio
 
     def reset(self, window_size = 64, max_capacity_prompt = 256 + 64, kernel_size = 5, pooling = 'avgpool', merge = None):
         self.window_size = window_size
@@ -283,6 +300,8 @@ class SnapKVCluster():
         self.kernel_size = kernel_size
         self.pooling = pooling
         self.merge = merge
+        self.ratio = ratio
+        self.recent_size = recent_size
 
     def update_kv(self, key_states, query_states, value_states, attention_mask, num_key_value_groups):
         
@@ -326,6 +345,50 @@ class SnapKVCluster():
             key_states = torch.cat([k_past_compress, k_cur], dim = 2)
             value_states = torch.cat([v_past_compress, v_cur], dim = 2)
             return key_states, value_states
+
+    def update_think(self, key_states, query_states, value_states, attention_mask, num_key_value_groups):
+        
+        # check if prefix phase
+        assert key_states.shape[-2] == query_states.shape[-2]
+        bsz, num_heads, q_len, head_dim = query_states.shape
+        
+        print(f"SnapKV max_capacity_prompt {self.max_capacity_prompt}")
+        
+        if q_len < self.max_capacity_prompt:
+            return key_states, value_states
+        else:
+            attn_weights = torch.matmul(query_states[..., -self.window_size:, :], key_states.transpose(2, 3)) / math.sqrt(head_dim)
+            mask = torch.full((self.window_size, self.window_size), torch.finfo(attn_weights.dtype).min, device=attn_weights.device)
+            mask_cond = torch.arange(mask.size(-1), device=attn_weights.device)
+            mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
+            mask = mask.to(attn_weights.device)
+            attention_mask = mask[None, None, :, :]
+
+            attn_weights[:, :, -self.window_size:, -self.window_size:] += attention_mask
+
+            attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+            attn_weights_sum = attn_weights[:, :, -self.window_size:, : -self.window_size].sum(dim = -2)
+            if self.pooling == 'avgpool':
+                attn_cache = F.avg_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+            elif self.pooling == 'maxpool':
+                attn_cache = F.max_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+            else:
+                raise ValueError('Pooling method not supported')
+            indices = attn_cache.topk(self.max_capacity_prompt - self.window_size, dim=-1).indices
+            indices = indices.unsqueeze(-1).expand(-1, -1, -1, head_dim)
+
+            if self.merge is not None:
+                key_states, value_states = merge_kv(key_states, value_states, indices, self.window_size, self.merge)
+                return key_states, value_states
+
+            k_past_compress = key_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+            v_past_compress = value_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+            k_cur = key_states[:, :, -self.window_size:, :]
+            v_cur = value_states[:, :, -self.window_size:, :]
+            key_states = torch.cat([k_past_compress, k_cur], dim = 2)
+            value_states = torch.cat([v_past_compress, v_cur], dim = 2)
+            kv_pruned, kv_recent, mask = key_pruner_query_driven(key_states, query_states, self.recent_size, self.ratio)
+            return kv_pruned, kv_recent, mask, value_states
 
 
 class L2NormCluster():
@@ -858,6 +921,34 @@ def init_snapkv(self):
         kernel_size = self.config.kernel_size,
         pooling = self.config.pooling,
         merge = self.config.merge,
+        )
+
+def init_think(self):
+    if not hasattr(self, "kv_cluster"):
+        if not hasattr(self.config, 'window_size'):
+            self.config.window_size = 32
+        if not hasattr(self.config, 'max_capacity_prompt'):
+            self.config.max_capacity_prompt = 4096
+        if not hasattr(self.config, 'kernel_size'):
+            self.config.kernel_size = 5
+        if not hasattr(self.config, 'pooling'):
+            self.config.pooling = 'avgpool'
+        if not hasattr(self.config, 'merge'):
+            self.config.merge = None
+        if not hasattr(self.config, 'recent_size'):
+            self.config.recent_size = 32
+        if not hasattr(self.config, 'ratio'):
+            self.config.ratio = 0.4
+    
+    
+    self.kv_cluster = SnapKVCluster( 
+        window_size = self.config.window_size, 
+        max_capacity_prompt = self.config.max_capacity_prompt, 
+        kernel_size = self.config.kernel_size,
+        pooling = self.config.pooling,
+        merge = self.config.merge,
+        recent_size = self.config.recent_size,
+        ratio = self.config.ratio
         )
 
 def init_l2norm(self):

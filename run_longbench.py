@@ -217,7 +217,7 @@ def main(args):
         
         
         if args.method != "FullKV":
-            if args.method.lower() in ["snapkv","pyramidkv","h2o","cam", "l2norm", "adakv", "headkv"]:
+            if args.method.lower() in ["snapkv","pyramidkv","h2o","cam", "l2norm", "adakv", "headkv", "think"]:
                 window_sizes = 8
             elif args.method.lower() in ["streamingllm"]:
                 window_sizes = max_capacity_prompts - 4
@@ -235,6 +235,8 @@ def main(args):
 
             kernel_sizes = 7
             pooling = "maxpool"
+            ratio = args.pruning_ratio
+            recent_size = args.recent_size
 
             layers = len(model.model.layers)
             # check if window_sizes is a list
@@ -244,6 +246,10 @@ def main(args):
                 max_capacity_prompts = [max_capacity_prompts] * layers
             if not isinstance(kernel_sizes, list):
                 kernel_sizes = [kernel_sizes] * layers
+            if not isinstance(ratio, list):
+                ratio = [ratio] * layers
+            if not isinstance(recent_size, list):
+                recent_size = [recent_size] * layers
             for i in range(layers):
                 model.model.layers[i].self_attn.config.window_size = window_sizes[i]
                 model.model.layers[i].self_attn.config.max_capacity_prompt = max_capacity_prompts[i]
@@ -251,6 +257,8 @@ def main(args):
                 model.model.layers[i].self_attn.config.pooling = pooling
                 model.model.layers[i].self_attn.config.merge = args.merge
                 model.model.layers[i].self_attn.config.floor = args.floor
+                model.model.layers[i].self_attn.config.ratio = ratio[i]
+                model.model.layers[i].self_attn.config.recent_size = recent_size[i]
             
 
         context_length = batch_input_ids.shape[-1]
@@ -342,6 +350,8 @@ if __name__ == "__main__":
     parser.add_argument('--floor', type=float, default=0.2, help='hyper-parameter used in AdaKV')
     parser.add_argument('--head_path', type=str, default='./data/heads_score/Meta-Llama-3-8B-Instruct_retrieval_reasoning_heads.json', help='Path to head score (HeadKV)')
     parser.add_argument('--head_beta', type=float, default=1.01, help='hyper-parameter used on HeadKV')
+    parser.add_argument("--recent_size", type=int, default=32, help="")
+    parser.add_argument("--pruning_ratio", type=float, default=0.4, help="pruning ratio of Key Cache")
 
     parser.add_argument(
         "--use_chat_format", 
