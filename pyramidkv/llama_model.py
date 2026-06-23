@@ -2595,6 +2595,17 @@ def _prepare_4d_causal_attention_mask_with_cache_position(
             )
 
     return causal_mask
+def _is_empty_past_key_values(past_key_values):
+    if past_key_values is None:
+        return True
+    key_cache = getattr(past_key_values, "key_cache", None)
+    if key_cache is not None:
+        return len(key_cache) == 0
+    if isinstance(past_key_values, tuple):
+        return len(past_key_values) == 0
+    return False
+
+
 def prepare_inputs_for_generation_llama_new(
         self,
         input_ids,
@@ -2606,10 +2617,9 @@ def prepare_inputs_for_generation_llama_new(
         use_cache=True,
         **kwargs,
     ):
-        if not isinstance(past_key_values, tuple):
-            if len(past_key_values.key_cache) == 0:
-                for layer in self.model.layers:
-                    layer.self_attn.kv_seq_len = 0
+        if _is_empty_past_key_values(past_key_values):
+            for layer in self.model.layers:
+                layer.self_attn.kv_seq_len = 0
 
         # If we have cache: let's slice `input_ids` through `cache_position`, to keep only the unprocessed tokens
         # Exception 1: when passing input_embeds, input_ids may be missing entries
@@ -2678,7 +2688,7 @@ def prepare_inputs_for_generation_llama(
 ):
     
     
-    if past_key_values is None or len(past_key_values.key_cache) == 0:
+    if _is_empty_past_key_values(past_key_values):
         for layer in self.model.layers:
             layer.self_attn.kv_seq_len = 0
     if past_key_values is not None:

@@ -111,9 +111,9 @@ def replace_mistral(method):
 
     elif method == "cam":
         print("Using CAM!")
-        transformers.models.llama.modeling_llama.LlamaAttention.forward = llama_attn_forward_CAM
-        transformers.models.llama.modeling_llama.LlamaFlashAttention2.forward = llama_flash_attn2_forward_CAM
-        transformers.models.llama.modeling_llama.LlamaSdpaAttention.forward = llama_sdpa_attn_forward_CAM
+        transformers.models.mistral.modeling_mistral.MistralAttention.forward = mistral_attn_forward_CAM
+        transformers.models.mistral.modeling_mistral.MistralFlashAttention2.forward = mistral_flash_attn2_forward_CAM
+        transformers.models.mistral.modeling_mistral.MistralSdpaAttention.forward = mistral_sdpa_attn_forward_CAM
         
     elif method == "snapkv":
         print("Using SnapKV!")

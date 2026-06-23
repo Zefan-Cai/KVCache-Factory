@@ -62,6 +62,13 @@ transformers >= 4.41
 flash-attn >= 2.4.0.post1
 ```
 
+## Reproducibility Notes
+
+* LongBench/RULER now use `7500` as the default Llama-3 prompt truncation length, matching the LongBench safety margin for 8K-context Llama-3 models.
+* Needle-in-haystack context files are loaded in sorted order so runs do not depend on filesystem-specific `glob` ordering.
+* The monkey-patched generation path resets per-layer `kv_seq_len` whenever a new empty cache is prepared. This prevents stale sequence-length state from leaking across independent `generate()` calls on the same model instance.
+* The Mistral CAM monkeypatch patches Mistral attention classes directly; it no longer redirects CAM to Llama attention classes.
+
 ##  Installation
 
 ```python

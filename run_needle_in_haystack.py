@@ -449,7 +449,7 @@ class LLMNeedleHaystackTester:
         max_context_length = max(self.context_lengths)
 
         while self.get_context_length_in_tokens(context) < max_context_length:
-            for file in glob.glob(f"{self.haystack_dir}/*.txt"):
+            for file in sorted(glob.glob(f"{self.haystack_dir}/*.txt")):
                 with open(file, 'r') as f:
                     context += f.read()
         return context

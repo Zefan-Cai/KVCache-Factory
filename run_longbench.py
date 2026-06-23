@@ -75,8 +75,8 @@ model2prompt = {
 model2maxlen = {
     "llama2": 3950,
     "llama-2": 3950,
-    "llama3": 7950,
-    "llama-3": 7950,
+    "llama3": 7500,
+    "llama-3": 7500,
     "mistral": 31500
 }
 
