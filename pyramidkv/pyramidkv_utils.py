@@ -542,13 +542,13 @@ class H2OKVCluster():
             return key_states, value_states
         else:
             attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(head_dim)
-            mask = torch.full((self.window_size, self.window_size), torch.finfo(attn_weights.dtype).min, device=attn_weights.device)
+            mask = torch.full((q_len, q_len), torch.finfo(attn_weights.dtype).min, device=attn_weights.device)
             mask_cond = torch.arange(mask.size(-1), device=attn_weights.device)
             mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
             mask = mask.to(attn_weights.device)
             attention_mask = mask[None, None, :, :]
 
-            attn_weights[:, :, -self.window_size:, -self.window_size:] += attention_mask
+            attn_weights += attention_mask
 
             attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
             attn_weights_sum = attn_weights[:, :, :, : -self.window_size].sum(dim = -2)
