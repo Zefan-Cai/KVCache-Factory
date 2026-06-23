@@ -20,6 +20,7 @@ KVCache-Factory is a unified playground for KV cache compression, retrieval, mer
 | `StreamingLLM` | Compression/eviction | Attention-sink plus sliding-window cache. |
 | `H2O` | Retrieval/compression | Heavy-hitter token retention. |
 | `SnapKV` | Retrieval/compression | Observation-window attention pooling. |
+| `Quest` | Query-aware retrieval | Page-level key min/max metadata and query-aware page/token selection. |
 | `PyramidKV` | Compression/budget allocation | Layer-wise pyramidal cache budget. |
 | `CAM` | Merge/compression | Cache merging with attention-informed value aggregation. |
 | `L2Norm` | Retrieval/compression | Norm-based token selection. |
@@ -177,10 +178,11 @@ python scripts/benchmark_latency_memory.py \
 - [x] Add explicit KIVI-style asymmetric quantized cache configuration.
 - [x] Add KV merge options.
 - [x] Add KVMerger-style weighted nearest-neighbor merge and merge-shape tests.
+- [x] Add a tested Quest-style query-aware page/token selector contract.
 - [ ] Add more representative high-citation/high-star KV cache algorithms.
 - [ ] Support Mixtral.
 - [ ] Support batch inference.
-- [ ] Support more decode-stage KV cache compression methods.
+- [ ] Wire more decode-stage KV cache compression methods into runtime attention hot paths.
 - [ ] Port the algorithm suite to nano-vllm and mini-sglang runtimes.
 
 ## Citation
@@ -207,4 +209,4 @@ If you find **PyramidKV** or this project useful, please cite:
 
 ## Acknowledgement
 
-Thanks to [SnapKV](https://github.com/FasterDecoding/SnapKV), [H2O](https://github.com/FMInference/H2O), [StreamingLLM](https://github.com/mit-han-lab/streaming-llm), [AdaKV](https://github.com/FFY0/AdaKV), and related open-source KV cache projects for making this research area easier to build on.
+Thanks to [SnapKV](https://github.com/FasterDecoding/SnapKV), [H2O](https://github.com/FMInference/H2O), [StreamingLLM](https://github.com/mit-han-lab/streaming-llm), [Quest](https://github.com/mit-han-lab/quest), [AdaKV](https://github.com/FFY0/AdaKV), and related open-source KV cache projects for making this research area easier to build on.
