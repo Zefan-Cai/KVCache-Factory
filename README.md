@@ -1,207 +1,197 @@
-![# KVCache-Facroty](assets/logo.png)
+<p align="center">
+  <img src="assets/logo.png" alt="KVCache-Factory" width="460">
+</p>
 
+# KVCache-Factory
 
+KVCache-Factory is a unified playground for KV cache compression, retrieval, merging, and quantization methods for long-context LLM inference. It started from PyramidKV and now includes multiple KV cache baselines under one evaluation interface.
 
 ## News
 
-- [2024-11-28] Çhange the name to KVCache-Factory! The target of our project is now a unified framework of KV Cache compression of diverse models.
+- **2024-11-28**: Renamed the project to **KVCache-Factory** to reflect the broader goal of supporting diverse KV cache compression methods.
+- **2024-06-25**: Added multi-GPU inference support for large LLMs, including Llama-3-70B-Instruct.
+- **2024-06-10**: Added FlashAttention v2 and SDPA paths for PyramidKV, SnapKV, H2O, and StreamingLLM. On GPUs without FlashAttention v2 support, set `--attn_implementation sdpa`.
 
-- [2024-06-25] Support multi-GPUs inference with big LLMs now! Try out PyramidKV on LlaMa-3-70B-Instruct!
+## Supported Methods
 
-- [2024-06-10] Support PyramidKV, SnapKV, H2O and StreamingLLM at Flash Attention v2, Sdpa Attention now! If your devices (i.e., V100, 3090) does not support Flash Attention v2, you can set attn_implementation=sdpa to try PyramidKV at Sdpa Attention!
+| Method | Type | Notes |
+| --- | --- | --- |
+| `FullKV` | Baseline | Keeps the full KV cache. |
+| `StreamingLLM` | Compression/eviction | Attention-sink plus sliding-window cache. |
+| `H2O` | Retrieval/compression | Heavy-hitter token retention. |
+| `SnapKV` | Retrieval/compression | Observation-window attention pooling. |
+| `PyramidKV` | Compression/budget allocation | Layer-wise pyramidal cache budget. |
+| `CAM` | Merge/compression | Cache merging with attention-informed value aggregation. |
+| `L2Norm` | Retrieval/compression | Norm-based token selection. |
+| `AdaKV` | Adaptive compression | Head-adaptive KV cache budgets. |
+| `HeadKV` | Adaptive retrieval/compression | Head-aware retrieval/reasoning cache allocation. |
+| `ThinK` | Key-cache pruning | Query-driven key-channel pruning for Llama LongBench runs. |
+| `MInference` | Sparse prefill acceleration | Optional integration through the MInference dependency. |
+| `KIVI` / `KVQuant` | Quantization | Enabled with `--quant_method kivi` or `--quant_method kvquant`. |
 
-## TODO:
+Llama and Mistral attention paths are supported for the main compression methods. Some newer methods currently have narrower runner/model coverage; check the runner argument choices before launching large jobs.
 
-- [x] Support implementation of Streaming LLM, H2O and SnapKV
-
-- [x] Support Mistral model
-
-- [x] Support implementation of Needle
-
-- [x] Support KV cache compression without Flash Attention v2 (i.e. Sdpa Attention) for V100
-
-- [x] Support multi-GPU inference for 70B LlaMa-3
-
-- [ ] Introduce new functions to support kv cache budget allocation (i.e., supports for percentage.)
-
-- [ ] Support Mixtral
-
-- [ ] Support Batch Inference
-
-- [ ] Support KV cache compression at decoding stage
-
-## Performence
+## Results
 
 <p align="center">
-    <img src="figs/Result.png" width="100%"> <br>
+  <img src="figs/Result.png" alt="LongBench results" width="760"><br>
+  <sub>LongBench performance comparison.</sub>
 </p>
 
 <p align="center">
-    <img src="figs/Needle.png" width="80%"> <br>
+  <img src="figs/Needle.png" alt="Needle-in-a-haystack results" width="760"><br>
+  <sub>Needle-in-a-haystack retrieval results.</sub>
 </p>
 
-
-## Visualization: Inefficient Attention 
-
-The Llama model attention map with 3 documents is represented as follows:
+## PyramidKV Overview
 
 <p align="center">
-    <img src="figs/attention_pattern.png" width="100%"> <br>
+  <img src="figs/PyramidKV.png" alt="PyramidKV method overview" width="760">
 </p>
 
-`./visualization-tools/vis.ipynb` reproduces the visualization results in the paper. We provide more visualization tools under `./visualization` that supports different levels of kv-cache visualization.
+## Visualization: Inefficient Attention
 
-Model attention maps for different layers would be stored at `./attention`
+The following attention map shows a Llama model attending over a prompt with three documents.
 
+<p align="center">
+  <img src="figs/attention_pattern.png" alt="Attention pattern with three documents" width="860">
+</p>
 
+Use `examples/visualization.ipynb` and the utilities under `pyramidkv/viztools/` to reproduce or customize attention visualizations. Generated attention maps are stored under `./attention` by default.
 
 ## Requirements
 
-```python
-transformers >= 4.41
-flash-attn >= 2.4.0.post1
+```text
+transformers==4.44.2
+torch
+flash-attn>=2.4.0.post1
+```
+
+Install the complete dependency set with `requirements.txt`. `flash-attn` is optional when using `--attn_implementation sdpa` or `eager`, but required for FlashAttention v2 experiments.
+
+## Installation
+
+```bash
+git clone https://github.com/Zefan-Cai/KVCache-Factory.git
+cd KVCache-Factory
+pip install -r requirements.txt
+export PYTHONPATH="$PWD:${PYTHONPATH}"
+```
+
+## LongBench
+
+Edit `scripts/scripts_longBench/eval.sh` or call `run_longbench.py` directly:
+
+```bash
+export CUDA_VISIBLE_DEVICES=0
+
+python3 run_longbench.py \
+  --method pyramidkv \
+  --model_path /path/to/Llama-3-8B-Instruct \
+  --max_capacity_prompts 512 \
+  --attn_implementation flash_attention_2 \
+  --save_dir ./results_long_bench \
+  --use_cache True
+```
+
+Common arguments:
+
+- `--method`: `FullKV`, `pyramidkv`, `snapkv`, `streamingllm`, `h2o`, `cam`, `l2norm`, `adakv`, `headkv`, `think`, or `minference`.
+- `--model_path`: local or Hugging Face model path.
+- `--attn_implementation`: `flash_attention_2`, `sdpa`, or `eager`.
+- `--max_capacity_prompts`: target KV cache budget per layer. PyramidKV redistributes the total budget across layers.
+- `--merge`: optional merge strategy such as `pivot`.
+- `--quant_method`: optional quantized cache path, `kivi` or `kvquant`.
+- `--nbits`: quantization bit width when `--quant_method` is set.
+
+The helper script accepts:
+
+```bash
+bash scripts/scripts_longBench/eval.sh \
+  0 pyramidkv 512 flash_attention_2 ./ /path/to/model none none 8
+```
+
+Argument order is `CUDA_VISIBLE_DEVICES`, `method`, `max_capacity_prompts`, `attn_implementation`, `source_path`, `model_path`, `merge_method`, `quant_method`, `nbits`.
+
+## Needle In A Haystack
+
+Edit `scripts/scripts_needle/eval.sh` or run:
+
+```bash
+python -u run_needle_in_haystack.py \
+  --s_len 1000 \
+  --e_len 8001 \
+  --model_provider LLaMA3 \
+  --model_name /path/to/Llama-3-8B-Instruct \
+  --attn_implementation flash_attention_2 \
+  --step 100 \
+  --method pyramidkv \
+  --max_capacity_prompt 96 \
+  --model_version Llama3_pyramidkv_96_test
+```
+
+Supported `--method` values for this runner are `full`, `pyramidkv`, `snapkv`, `streamingllm`, `h2o`, and `cam`.
+
+After inference, update `FOLDER_PATH` in `scripts/scripts_needle/visualize.py`, then run:
+
+```bash
+python scripts/scripts_needle/visualize.py
+```
+
+## RULER
+
+Edit `scripts/scripts_ruler/eval.sh` or call `run_ruler.py` directly. The RULER path shares the same core arguments as LongBench and supports `snapkv`, `pyramidkv`, `h2o`, `cam`, `l2norm`, `streamingllm`, plus optional quantized cache runs.
+
+## Latency And Memory Benchmark
+
+To compare decoding latency and peak memory for one prompt:
+
+```bash
+python scripts/benchmark_latency_memory.py \
+  --model_path /path/to/model \
+  --method pyramidkv \
+  --attn_implementation flash_attention_2 \
+  --max_capacity_prompt 512 \
+  --max_new_tokens 256 \
+  --repeat 3
 ```
 
 ## Reproducibility Notes
 
-* LongBench/RULER now use `7500` as the default Llama-3 prompt truncation length, matching the LongBench safety margin for 8K-context Llama-3 models.
-* Needle-in-haystack context files are loaded in sorted order so runs do not depend on filesystem-specific `glob` ordering.
-* The monkey-patched generation path resets per-layer `kv_seq_len` whenever a new empty cache is prepared. This prevents stale sequence-length state from leaking across independent `generate()` calls on the same model instance.
-* The Mistral CAM monkeypatch patches Mistral attention classes directly; it no longer redirects CAM to Llama attention classes.
+- LongBench and RULER use `7500` as the default Llama-3 prompt truncation length, matching the LongBench safety margin for 8K-context Llama-3 models.
+- Needle-in-a-haystack context files are loaded in sorted order so runs do not depend on filesystem-specific `glob` ordering.
+- The monkey-patched generation path resets per-layer `kv_seq_len` whenever a new empty cache is prepared. This prevents stale sequence-length state from leaking across independent `generate()` calls on the same model instance.
+- The Mistral CAM monkeypatch patches Mistral attention classes directly; it no longer redirects CAM to Llama attention classes.
 
-##  Installation
+## Roadmap
 
-```python
-
-git clone https://github.com/Zefan-Cai/PyramidKV.git
-cd PyramidKV
-pip install -r requirements.txt .
-
-```
-
-## Inference
-
-
-We support inference code on `LongBench` to repuduce our result.
-
-Please refer to `scripts/scripts_longBench/eval.sh` to modify the parameters according to your requirements.
-
-Our codebase support Flash Attention v2, Sdpa Attention, etc. The results presented in our paper in based on Flash Attention v2.
-
-```bash
-export CUDA_VISIBLE_DEVICES=$1
-
-method=$2 # Support PyramidKV, SnapKV, H2O, StreamingLLM
-max_capacity_prompts=64 # 128,2048 in paper
-attn_implementation=$3 # Support "flash_attention_2", "sdpa", "eager".
-source_path=$4
-model_path=$5
-save_dir=${source_path}"results_long_bench" # path to result save_dir
-
-python3 run_longbench.py \
-    --method ${method} \
-    --model_path ${model_path} \
-    --max_capacity_prompts ${max_capacity_prompts} \
-    --attn_implementation ${attn_implementation} \
-    --save_dir ${save_dir} \
-    --use_cache True
-
-
-```
-
-* CUDA_VISIBLE_DEVICES: For multi-GPU inference for big LLMs, just need to specify CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7. For single GPU inference, just need to specify CUDA_VISIBLE_DEVICES=0.
-* model_path: Path to your model. Support "Llama-3-8B-Instruct" for now.
-* method: Support `PyramidKV`, `SnapKV`, `StreamingLLM`, `H2O`.
-* max_capacity_prompts: Selected KV Size in each layer. （e.g. 128, 2048 in paper）. When method is "PyramidKV", given that the total number of KV remains unchanged, the specific KV length for each layer will be modified accordingly
-* save_dir: Path to your dir to save LongBench result.
-
-After modifying parameters, run:
-
-```bash 
-
-sh scripts/scripts_longBench/eval.sh
-
-```
-
-To compare decoding latency and peak memory for a single prompt, use:
-
-```bash
-python scripts/benchmark_latency_memory.py \
-    --model_path /path/to/model \
-    --method pyramidkv \
-    --attn_implementation flash_attention_2 \
-    --max_capacity_prompt 512 \
-    --max_new_tokens 256 \
-    --repeat 3
-```
-
-## Needle in haystack
-
-We support inference code on `Needle in haystack` to repuduce our result.
-
-Please refer to `scripts/scripts_needle/eval.sh` to modify the parameters according to your requirements.
-
-Our codebase support Flash Attention v2, Sdpa Attention, etc. The results presented in our paper in based on Flash Attention v2.
-
-```
-
-METHOD='pyramidkv'       # ['full', 'pyramidkv', 'snapkv', 'streamingllm', 'h2o']
-MAX_CAPACITY_PROMPT=96  # [64, 96, 128, 256, 512, 1024, 2048, ...]
-attn_implementation="flash_attention_2" # Support "flash_attention_2", "sdpa", "".
-TAG=test
-
-
-# For Llama3-8b
-
-(
-python -u run_needle_in_haystack.py --s_len 1000 --e_len 8001\
-    --model_provider LLaMA3 \
-    --model_name /mnt/workspace/zhiyuanhu/yuliang/models/llama3-8b_raw \
-    --attn_implementation ${attn_implementation} \
-    --step 100 \
-    --method $METHOD \
-    --max_capacity_prompt $MAX_CAPACITY_PROMPT \
-    --model_version LlaMA3_${METHOD}_${MAX_CAPACITY_PROMPT}_${TAG}
-) 2>&1  | tee results_needle/logs/LlaMA3_${METHOD}_${MAX_CAPACITY_PROMPT}_${TAG}.log
-
-```
-
-* Both LLaMA3 and Mistral2 inference support on single GPU.
-* model_provider: LLaMA3 or Mistral2
-* model_name: Path to your model. Support "Llama-3-8B-Instruct" "Mistral-7B-Instruct-v0.2" and for now.
-* step: The increase of context length.
-* method: Support `PyramidKV`, `SnapKV`, `StreamingLLM`, `H2O`.
-* max_capacity_prompt: Selected KV Size in each layer. （e.g. 128, 2048 in paper）. When method is "PyramidKV", given that the total number of KV remains unchanged, the specific KV length for each layer will be modified accordingly
-
-
-
-To reproduce our results, run
-
-```
-bash scripts/scripts_needle/eval.sh
-```
-
-After inference, run
-
-`python scripts/scripts_needle/visualize.py` 
-
-to draw the img, you should change `FOLDER_PATH` in `visualize.py` to your output path (the argument of `--model_version` in `eval.sh`).
-
+- [x] Support StreamingLLM, H2O, SnapKV, and PyramidKV.
+- [x] Support Mistral models.
+- [x] Support Needle-in-a-haystack evaluation.
+- [x] Support SDPA cache compression for GPUs without FlashAttention v2.
+- [x] Support multi-GPU inference for 70B Llama-3.
+- [x] Add cache quantization options.
+- [x] Add KV merge options.
+- [ ] Add more representative high-citation/high-star KV cache algorithms.
+- [ ] Support Mixtral.
+- [ ] Support batch inference.
+- [ ] Support more decode-stage KV cache compression methods.
+- [ ] Port the algorithm suite to nano-vllm and mini-sglang runtimes.
 
 ## Citation
 
-If you find **PyramidKV** useful for your research and applications, please kindly cite using this BibTeX:
+If you find **PyramidKV** or this project useful, please cite:
 
-```latex
+```bibtex
 @article{cai2024pyramidkv,
   title={Pyramidkv: Dynamic kv cache compression based on pyramidal information funneling},
-  author={Cai, Zefan and Zhang, Yichi and Gao, Bofei and Liu, Yuliang and Liu, Tianyu and Lu, Keming and Xiong, Wayne and Dong, Yue and Chang, Baobao and Hu, Junjie and Xiao Wen},
+  author={Cai, Zefan and Zhang, Yichi and Gao, Bofei and Liu, Yuliang and Liu, Tianyu and Lu, Keming and Xiong, Wayne and Dong, Yue and Chang, Baobao and Hu, Junjie and Xiao, Wen},
   journal={arXiv preprint arXiv:2406.02069},
   year={2024}
 }
 ```
 
-```latex
+```bibtex
 @article{fu2024not,
   title={Not All Heads Matter: A Head-Level KV Cache Compression Method with Integrated Retrieval and Reasoning},
   author={Fu, Yu and Cai, Zefan and Asi, Abedelkadir and Xiong, Wayne and Dong, Yue and Xiao, Wen},
@@ -212,5 +202,4 @@ If you find **PyramidKV** useful for your research and applications, please kind
 
 ## Acknowledgement
 
-
-Thanks **[SnapKV]** [SnapKV: LLM Knows What You are Looking for Before Generation](https://github.com/FasterDecoding/SnapKV) for providing open-source code to support the expansion of this project.
+Thanks to [SnapKV](https://github.com/FasterDecoding/SnapKV), [H2O](https://github.com/FMInference/H2O), [StreamingLLM](https://github.com/mit-han-lab/streaming-llm), [AdaKV](https://github.com/FFY0/AdaKV), and related open-source KV cache projects for making this research area easier to build on.

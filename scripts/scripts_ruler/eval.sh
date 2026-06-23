@@ -9,6 +9,14 @@ quant_method=$7 # Support kivi and kvquant, default None.
 nbits=$8 # Quantization bit-width support 8,4,2. Need to set quant_method first.
 save_dir=${result_path}"results_ruler" # path to result save_dir
 
+extra_args=()
+if [ -n "${quant_method}" ] && [ "${quant_method}" != "none" ] && [ "${quant_method}" != "None" ]; then
+    extra_args+=(--quant_method "${quant_method}")
+    if [ -n "${nbits}" ]; then
+        extra_args+=(--nbits "${nbits}")
+    fi
+fi
+
 python3 run_ruler.py \
     --method ${method} \
     --model_path ${model_path} \
@@ -16,5 +24,4 @@ python3 run_ruler.py \
     --attn_implementation ${attn_implementation} \
     --save_dir ${save_dir} \
     --use_cache True \
-    --nbits ${nbits} \
-    --quant_method ${quant_method}
+    "${extra_args[@]}"
