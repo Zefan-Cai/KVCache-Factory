@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 KIVI_AXIS_KEY = 1
 KIVI_AXIS_VALUE = 0
 DEFAULT_QUANT_BACKEND = "hqq"
-SUPPORTED_QUANT_METHODS = ("kivi", "kvquant")
+SUPPORTED_QUANT_METHODS = ("kivi", "kvquant", "gear")
 
 
 def normalize_quant_method(method: Optional[str]) -> Optional[str]:
@@ -32,6 +32,8 @@ def build_quantized_cache_config(
     q_group_size: int = 64,
     axis_key: Optional[int] = None,
     axis_value: Optional[int] = None,
+    rank: int = 4,
+    outlier_ratio: float = 0.0,
 ) -> Optional[Dict[str, Any]]:
     """Build the Hugging Face `generate(..., cache_config=...)` dictionary.
 
@@ -39,6 +41,8 @@ def build_quantized_cache_config(
     layout used by Transformers, this is represented by `axis_key=1` and
     `axis_value=0`. `kvquant` intentionally uses the same runner config but
     swaps the HQQ cache class for the local outlier-preserving implementation.
+    GEAR additionally records `rank` and `outlier_ratio` for the low-rank
+    residual reconstruction recipe.
     """
 
     method = normalize_quant_method(quant_method)
@@ -51,7 +55,7 @@ def build_quantized_cache_config(
     if q_group_size <= 0:
         raise ValueError(f"q_group_size must be positive, got {q_group_size}")
 
-    return {
+    config: Dict[str, Any] = {
         "nbits": nbits,
         "backend": backend.lower(),
         "device": device,
@@ -60,6 +64,14 @@ def build_quantized_cache_config(
         "axis_value": KIVI_AXIS_VALUE if axis_value is None else axis_value,
         "q_group_size": q_group_size,
     }
+    if method == "gear":
+        if rank <= 0:
+            raise ValueError(f"GEAR rank must be positive, got {rank}")
+        if not 0.0 <= outlier_ratio <= 1.0:
+            raise ValueError(f"GEAR outlier_ratio must be in [0, 1], got {outlier_ratio}")
+        config["rank"] = rank
+        config["outlier_ratio"] = outlier_ratio
+    return config
 
 
 def patch_quantized_cache(quant_method: Optional[str]) -> None:

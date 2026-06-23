@@ -30,6 +30,7 @@ This backlog tracks representative KV cache algorithms to keep or implement in K
 | Merge | KVMerger-style weighted merge | OpenReview/arXiv 2024; adaptive token-level KV merging | Implemented nearest-neighbor weighted merge (`--merge weighted`) |
 | Quantization | KIVI-style HQQ cache config | `jy-yuan/KIVI`: 411 stars; ICML 2024; key per-channel/value per-token axis defaults | Implemented config path (`--quant_method kivi`) |
 | Quantization | KVQuant-style outlier path | `squeezeailab/kvquant`: 427 stars; NeurIPS 2024 | Partially implemented (`--quant_method kvquant`) |
+| Quantization | GEAR-style low-rank residual | arXiv 2024; near-lossless KV compression recipe | CPU-tested `compress_kv_gear` / `decompress_kv_gear` in nano-vllm and mini-sglang; CLI config metadata in KVCache-Factory (`--quant_method gear --rank --outlier_ratio`). Runtime cache wiring still pending. |
 | Sparse prefill | MInference | `microsoft/MInference`: 1220 stars; NeurIPS 2024 Spotlight | Partially integrated |
 
 ## Priority Candidates
@@ -42,7 +43,7 @@ This backlog tracks representative KV cache algorithms to keep or implement in K
 | P1 | Compression runtime integration | NACL hot path | ACL 2024; single-operation encoding-time eviction | Decode-time NACL block/page policy wired in nano-vllm and mini-sglang; reference repo Hugging Face prompt-time eviction wrapper still pending. |
 | P1 | Compression runtime integration | Scissorhands hot path | NeurIPS 2023; persistence-of-importance eviction baseline | Decode-time Scissorhands block/page policy wired in nano-vllm and mini-sglang (with optional caller-supplied importance buffer, Quest-style fallback, and topk/probabilistic selection); reference repo Hugging Face decode-time wrapper still pending. |
 | P1 | Cross-layer runtime integration | MiniCache hot path | NeurIPS 2024; depth-dimension KV compression | Runtime-side `MiniCachePairStore` landed in nano-vllm and mini-sglang: per-layer-pair compressed-pair storage with K-determined shared retention indices, magnitude-preserving SLERP restore, and exact round-trip on retained tokens. Hugging Face reference repo wrapper still pending. |
-| P1 | Quantization | GEAR | arXiv 2024; near-lossless KV compression recipe | Add low-rank/residual quantization prototype if it fits the current cache abstraction. |
+| P1 | Quantization | GEAR | arXiv 2024; near-lossless KV compression recipe | CPU prototype landed: nano-vllm and mini-sglang expose `compress_kv_gear` / `decompress_kv_gear` with uniform quantization + SVD-based low-rank residual reconstruction; KVCache-Factory CLI accepts `--quant_method gear --rank --outlier_ratio`. Remaining: wire the payload into a paged cache layout and validate end-to-end loss recovery on GPU. |
 | P2 | Systems compression | CacheGen | SIGCOMM 2024; 72 OpenAlex citations; `UChi-JCL/CacheGen`: 159 stars | Track for cache serialization/streaming rather than first-pass in-model attention. |
 | P2 | Library baseline | NVIDIA kvpress | `NVIDIA/kvpress`: 1116 stars and active in 2026 | Use as an interoperability/reference baseline; do not blindly copy its API. |
 | P2 | Quantization | TurboQuant | ICLR 2026; Google Research; strong new quantization idea but low citation age | Track after KIVI/KVQuant/GEAR unless a compact reference implementation becomes mature. |

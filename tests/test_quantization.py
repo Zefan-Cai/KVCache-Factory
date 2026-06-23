@@ -40,6 +40,29 @@ class QuantizationConfigTest(unittest.TestCase):
         self.assertEqual(config["axis_value"], 1)
         self.assertEqual(config["q_group_size"], 32)
 
+    def test_builds_gear_config_with_rank_and_outlier_ratio(self):
+        config = build_quantized_cache_config(
+            "gear",
+            nbits=3,
+            residual_length=128,
+            rank=8,
+            outlier_ratio=0.02,
+        )
+        self.assertEqual(config["nbits"], 3)
+        self.assertEqual(config["rank"], 8)
+        self.assertAlmostEqual(config["outlier_ratio"], 0.02)
+
+    def test_gear_config_rejects_bad_rank_and_outlier_ratio(self):
+        with self.assertRaises(ValueError):
+            build_quantized_cache_config("gear", nbits=4, residual_length=128, rank=0)
+        with self.assertRaises(ValueError):
+            build_quantized_cache_config("gear", nbits=4, residual_length=128, outlier_ratio=1.5)
+
+    def test_kivi_config_omits_gear_fields(self):
+        config = build_quantized_cache_config("kivi", nbits=2, residual_length=128)
+        self.assertNotIn("rank", config)
+        self.assertNotIn("outlier_ratio", config)
+
 
 if __name__ == "__main__":
     unittest.main()

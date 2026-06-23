@@ -31,7 +31,7 @@ KVCache-Factory is a unified playground for KV cache compression, retrieval, mer
 | `HeadKV` | Adaptive retrieval/compression | Head-aware retrieval/reasoning cache allocation. |
 | `ThinK` | Key-cache pruning | Query-driven key-channel pruning for Llama LongBench runs. |
 | `MInference` | Sparse prefill acceleration | Optional integration through the MInference dependency. |
-| `KIVI` / `KVQuant` | Quantization | Enabled with `--quant_method kivi` or `--quant_method kvquant`. |
+| `KIVI` / `KVQuant` / `GEAR` | Quantization | Enabled with `--quant_method kivi`, `--quant_method kvquant`, or `--quant_method gear`. GEAR additionally accepts `--rank` and `--outlier_ratio`. |
 
 Llama and Mistral attention paths are supported for the main compression methods. Some newer methods currently have narrower runner/model coverage; check the runner argument choices before launching large jobs.
 
@@ -105,7 +105,7 @@ Common arguments:
 - `--attn_implementation`: `flash_attention_2`, `sdpa`, or `eager`.
 - `--max_capacity_prompts`: target KV cache budget per layer. PyramidKV redistributes the total budget across layers.
 - `--merge`: optional merge strategy, `pivot` or `weighted`.
-- `--quant_method`: optional quantized cache path, `kivi` or `kvquant`.
+- `--quant_method`: optional quantized cache path, `kivi`, `kvquant`, or `gear`.
 - `--nbits`: quantization bit width when `--quant_method` is set.
 - `--quant_backend`: quantized cache backend, `hqq` by default.
 - `--quant_residual_length`: full-precision residual cache window; defaults to `max_new_tokens`.
