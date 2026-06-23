@@ -117,57 +117,88 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 def merge_kv(key_states, value_states, indices, window_size, merge):
-    # merge methods in LOOK-M 
-
+    # Merge methods inspired by LOOK-M and KVMerger.
     bsz, num_heads, k_len, head_dim = key_states.shape
+    past_len = k_len - window_size
+    if past_len <= 0:
+        return key_states, value_states
 
-    # kv-selected
-    selected_keys = key_states.gather(dim=2, index=indices)  # [bsz, num_heads, topk_len, head_dim]
-    selected_values = value_states.gather(dim=2, index=indices)  # [bsz, num_heads, topk_len, head_dim]
+    token_indices = indices[..., 0] if indices.dim() == 4 else indices
+    token_indices = token_indices.clamp(min=0, max=past_len - 1)
+    gather_indices = token_indices.unsqueeze(-1).expand(-1, -1, -1, head_dim)
 
-    # kv-drop
-    all_indices = torch.arange(k_len, device=key_states.device).unsqueeze(0).unsqueeze(0).expand(bsz, num_heads, k_len)
-    all_indices_flattened = all_indices.flatten()  # [bsz * num_heads * (k_len-window_size)]
-    selected_indices_flattened = indices.flatten()  # [bsz * num_heads * topk_len]
-    is_selected = torch.isin(all_indices_flattened, selected_indices_flattened)
-    drop_indices_flattened = all_indices_flattened[~is_selected] 
-    drop_len = drop_indices_flattened.shape[0] // (all_indices.shape[0] * all_indices.shape[1])
-    drop_indices = drop_indices_flattened.reshape(all_indices.shape[0], all_indices.shape[1], drop_len) # [bsz * num_heads * (k_len-window_size-topk_len)]
-    drop_indices = drop_indices.unsqueeze(-1).expand(-1, -1, -1, head_dim)  # [bsz, num_heads, (k_len-window_size-topk_len), head_dim]
-    drop_keys = key_states.gather(dim=2, index=drop_indices)
-    drop_values = value_states.gather(dim=2, index=drop_indices)
+    past_keys = key_states[:, :, :past_len, :]
+    past_values = value_states[:, :, :past_len, :]
+    recent_keys = key_states[:, :, past_len:, :]
+    recent_values = value_states[:, :, past_len:, :]
 
-    # kv-recent
-    recent_keys = key_states[:, :, -window_size:, :]
+    selected_keys = past_keys.gather(dim=2, index=gather_indices)
+    selected_values = past_values.gather(dim=2, index=gather_indices)
 
-    ##### apply merge #####
-    # prepare for merge
-    k_hh_pruned = drop_keys  # [bsz, num_heads, k_len-topk_len-window_size, head_dim]
-    k_hh_recent = torch.cat([recent_keys, selected_keys], dim=2)  # [bsz, num_heads, topk_len+window_size, head_dim]
-    v_hh_pruned = drop_values  # [bsz, num_heads, k_len-topk_len-window_size, head_dim]
-    v_hh_recent = torch.cat([selected_values, value_states[:, :, -window_size:, :]], dim=2)  # [bsz, num_heads, topk_len+window_size, head_dim]
-    # similarity matrix
-    similarity = (k_hh_pruned / torch.norm(k_hh_pruned, dim=-1).unsqueeze(-1).repeat(1, 1, 1, 128)) @ ((k_hh_recent / (torch.norm(k_hh_recent, dim=-1).unsqueeze(-1).repeat(1, 1, 1, 128))).transpose(-1, -2)) # cosin
+    selected_mask = torch.zeros((bsz, num_heads, past_len), dtype=torch.bool, device=key_states.device)
+    selected_mask.scatter_(dim=2, index=token_indices, value=True)
+    drop_mask = ~selected_mask
+    drop_len = int(drop_mask.sum(dim=2).max().item())
+    retained_keys = torch.cat([selected_keys, recent_keys], dim=2)
+    retained_values = torch.cat([selected_values, recent_values], dim=2)
+    if drop_len == 0:
+        return retained_keys, retained_values
+
+    drop_indices = []
+    for batch_idx in range(bsz):
+        head_indices = []
+        for head_idx in range(num_heads):
+            current = torch.nonzero(drop_mask[batch_idx, head_idx], as_tuple=False).flatten()
+            if current.numel() < drop_len:
+                pad = current.new_full((drop_len - current.numel(),), current[-1].item() if current.numel() else 0)
+                current = torch.cat([current, pad], dim=0)
+            head_indices.append(current)
+        drop_indices.append(torch.stack(head_indices, dim=0))
+    drop_indices = torch.stack(drop_indices, dim=0).unsqueeze(-1).expand(-1, -1, -1, head_dim)
+    dropped_keys = past_keys.gather(dim=2, index=drop_indices)
+    dropped_values = past_values.gather(dim=2, index=drop_indices)
+
+    dropped_norm = F.normalize(dropped_keys, p=2, dim=-1, eps=1e-6)
+    retained_norm = F.normalize(retained_keys, p=2, dim=-1, eps=1e-6)
+    similarity = torch.matmul(dropped_norm, retained_norm.transpose(-1, -2))
     max_values, max_indices = similarity.max(dim=-1)
+    scatter_indices = max_indices.unsqueeze(-1).expand(-1, -1, -1, head_dim)
 
-    # pivot merge
-    if merge=="pivot":
-        print("Pivot merge")
-        merged_indices = max_indices.unsqueeze(-1).repeat(1, 1, 1, 128)
-        k_hh_selected = torch.gather(input=k_hh_recent, dim=2, index=merged_indices)
-        k_hh_merged = (k_hh_pruned + k_hh_selected)/2
-        k_hh_recent = torch.scatter_reduce(input=k_hh_recent, dim=2, index=merged_indices, src=k_hh_merged, reduce='mean', include_self=True) # include_self=True seems decrease the performance
-        v_hh_selected = torch.gather(input=v_hh_recent, dim=2, index=merged_indices)
-        v_hh_merged = (v_hh_pruned + v_hh_selected)/2
-        v_hh_recent = torch.scatter_reduce(input=v_hh_recent, dim=2, index=merged_indices, src=v_hh_merged, reduce='mean', include_self=True)
+    if merge == "pivot":
+        selected_keys_for_merge = torch.gather(retained_keys, dim=2, index=scatter_indices)
+        merged_keys = (dropped_keys + selected_keys_for_merge) / 2
+        retained_keys = torch.scatter_reduce(
+            input=retained_keys,
+            dim=2,
+            index=scatter_indices,
+            src=merged_keys,
+            reduce="mean",
+            include_self=True,
+        )
+        selected_for_merge = torch.gather(retained_values, dim=2, index=scatter_indices)
+        merged_values = (dropped_values + selected_for_merge) / 2
+        retained_values = torch.scatter_reduce(
+            input=retained_values,
+            dim=2,
+            index=scatter_indices,
+            src=merged_values,
+            reduce="mean",
+            include_self=True,
+        )
+    elif merge == "weighted":
+        weights = ((max_values + 1.0) / 2.0).clamp_min(1e-6).unsqueeze(-1)
+        key_updates = torch.zeros_like(retained_keys)
+        value_updates = torch.zeros_like(retained_values)
+        weight_updates = torch.zeros_like(retained_values[..., :1])
+        key_updates.scatter_add_(dim=2, index=scatter_indices, src=dropped_keys * weights)
+        value_updates.scatter_add_(dim=2, index=scatter_indices, src=dropped_values * weights)
+        weight_updates.scatter_add_(dim=2, index=max_indices.unsqueeze(-1), src=weights)
+        retained_keys = (retained_keys + key_updates) / (1.0 + weight_updates)
+        retained_values = (retained_values + value_updates) / (1.0 + weight_updates)
     else:
-        raise ValueError('Merge method not supported')
-        
-    # TODO: other merge strategies
-    # average merge
-    # weight merge
+        raise ValueError(f"Merge method {merge!r} not supported")
 
-    return k_hh_recent, v_hh_recent
+    return retained_keys, retained_values
 
 
 class PyramidKVCluster():

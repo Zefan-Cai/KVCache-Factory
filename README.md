@@ -100,7 +100,7 @@ Common arguments:
 - `--model_path`: local or Hugging Face model path.
 - `--attn_implementation`: `flash_attention_2`, `sdpa`, or `eager`.
 - `--max_capacity_prompts`: target KV cache budget per layer. PyramidKV redistributes the total budget across layers.
-- `--merge`: optional merge strategy such as `pivot`.
+- `--merge`: optional merge strategy, `pivot` or `weighted`.
 - `--quant_method`: optional quantized cache path, `kivi` or `kvquant`.
 - `--nbits`: quantization bit width when `--quant_method` is set.
 - `--quant_backend`: quantized cache backend, `hqq` by default.
@@ -176,6 +176,7 @@ python scripts/benchmark_latency_memory.py \
 - [x] Add cache quantization options.
 - [x] Add explicit KIVI-style asymmetric quantized cache configuration.
 - [x] Add KV merge options.
+- [x] Add KVMerger-style weighted nearest-neighbor merge and merge-shape tests.
 - [ ] Add more representative high-citation/high-star KV cache algorithms.
 - [ ] Support Mixtral.
 - [ ] Support batch inference.
