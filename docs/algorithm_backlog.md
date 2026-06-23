@@ -46,6 +46,8 @@ This backlog tracks representative KV cache algorithms to keep or implement in K
 ## Runtime Porting Notes
 
 - KVCache-Factory can use Hugging Face monkeypatches; nano-vllm and mini-sglang need runtime-native integration.
+- Nano-vllm status: `nanovllm.kvcache_factory` now contains CPU-tested core selectors for StreamingLLM/H2O/SnapKV, nearest-token merge for LOOK-M/KVMerger-style modes, and KIVI/KVQuant config metadata. Next step: wire these contracts into block-table/cache updates without breaking prefix-cache invariants.
+- Mini-sglang status: `minisgl.kvcache_factory` now contains the matching CPU-tested core selectors, nearest-token merge, and KIVI/KVQuant config metadata. Next step: wire these contracts into cache managers/attention backends while preserving radix-prefix sharing semantics.
 - For nano-vllm, preserve block-table and cache allocation invariants before pruning or merging tokens.
 - For mini-sglang, preserve prefix-sharing/radix-cache semantics before modifying cache contents.
 - Every method needs at least synthetic shape/budget tests in all target repos before GPU benchmarking.
