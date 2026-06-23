@@ -28,6 +28,12 @@ if is_flash_attn_2_available():
 
 logger = logging.get_logger(__name__)
 
+
+def _align_attention_mask(attention_mask, kv_cache_len):
+    if attention_mask is not None and attention_mask.shape[-1] != kv_cache_len:
+        attention_mask = attention_mask[..., -kv_cache_len:]
+    return attention_mask
+
 # def _flash_attention_forward(
 #     self, query_states, key_states, value_states, attention_mask, query_length, dropout=0.0, softmax_scale=None
 # ):
@@ -163,17 +169,19 @@ def mistral_attn_forward_H2O(
         past_key_value._seen_tokens=self.kv_seq_len
     
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+    kv_cache_len = key_states.shape[-2]
 
-    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
+    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_cache_len):
         raise ValueError(
-            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
+            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_cache_len)}, but is"
             f" {attn_weights.size()}"
         )
 
+    attention_mask = _align_attention_mask(attention_mask, kv_cache_len)
     if attention_mask is not None:
-        if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
+        if attention_mask.size() != (bsz, 1, q_len, kv_cache_len):
             raise ValueError(
-                f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
+                f"Attention mask should be of size {(bsz, 1, q_len, kv_cache_len)}, but is {attention_mask.size()}"
             )
 
         attn_weights = attn_weights + attention_mask
@@ -582,17 +590,19 @@ def mistral_attn_forward_L2Norm(
         past_key_value._seen_tokens=self.kv_seq_len
     
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+    kv_cache_len = key_states.shape[-2]
 
-    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
+    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_cache_len):
         raise ValueError(
-            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
+            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_cache_len)}, but is"
             f" {attn_weights.size()}"
         )
 
+    attention_mask = _align_attention_mask(attention_mask, kv_cache_len)
     if attention_mask is not None:
-        if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
+        if attention_mask.size() != (bsz, 1, q_len, kv_cache_len):
             raise ValueError(
-                f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
+                f"Attention mask should be of size {(bsz, 1, q_len, kv_cache_len)}, but is {attention_mask.size()}"
             )
 
         attn_weights = attn_weights + attention_mask
@@ -730,10 +740,12 @@ def mistral_sdpa_attn_forward_L2Norm(
 
 
 
+    kv_cache_len = key_states.shape[-2]
+    attention_mask = _align_attention_mask(attention_mask, kv_cache_len)
     if attention_mask is not None:
-        if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
+        if attention_mask.size() != (bsz, 1, q_len, kv_cache_len):
             raise ValueError(
-                f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
+                f"Attention mask should be of size {(bsz, 1, q_len, kv_cache_len)}, but is {attention_mask.size()}"
             )
 
     # SDPA with memory-efficient backend is currently (torch==2.1.2) bugged with non-contiguous inputs with custom attn_mask,
@@ -1001,17 +1013,19 @@ def mistral_attn_forward_CAM(
         past_key_value._seen_tokens=self.kv_seq_len
     
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+    kv_cache_len = key_states.shape[-2]
 
-    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
+    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_cache_len):
         raise ValueError(
-            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
+            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_cache_len)}, but is"
             f" {attn_weights.size()}"
         )
 
+    attention_mask = _align_attention_mask(attention_mask, kv_cache_len)
     if attention_mask is not None:
-        if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
+        if attention_mask.size() != (bsz, 1, q_len, kv_cache_len):
             raise ValueError(
-                f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
+                f"Attention mask should be of size {(bsz, 1, q_len, kv_cache_len)}, but is {attention_mask.size()}"
             )
 
         attn_weights = attn_weights + attention_mask
@@ -1422,17 +1436,19 @@ def mistral_attn_forward_StreamingLLM(
 
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+    kv_cache_len = key_states.shape[-2]
 
-    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
+    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_cache_len):
         raise ValueError(
-            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
+            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_cache_len)}, but is"
             f" {attn_weights.size()}"
         )
 
+    attention_mask = _align_attention_mask(attention_mask, kv_cache_len)
     if attention_mask is not None:
-        if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
+        if attention_mask.size() != (bsz, 1, q_len, kv_cache_len):
             raise ValueError(
-                f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
+                f"Attention mask should be of size {(bsz, 1, q_len, kv_cache_len)}, but is {attention_mask.size()}"
             )
 
         attn_weights = attn_weights + attention_mask
@@ -1841,17 +1857,19 @@ def mistral_attn_forward_PyramidKV(
         past_key_value._seen_tokens=self.kv_seq_len
     
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+    kv_cache_len = key_states.shape[-2]
 
-    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
+    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_cache_len):
         raise ValueError(
-            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
+            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_cache_len)}, but is"
             f" {attn_weights.size()}"
         )
 
+    attention_mask = _align_attention_mask(attention_mask, kv_cache_len)
     if attention_mask is not None:
-        if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
+        if attention_mask.size() != (bsz, 1, q_len, kv_cache_len):
             raise ValueError(
-                f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
+                f"Attention mask should be of size {(bsz, 1, q_len, kv_cache_len)}, but is {attention_mask.size()}"
             )
 
         attn_weights = attn_weights + attention_mask
@@ -2257,17 +2275,19 @@ def mistral_attn_forward_SnapKV(
     
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+    kv_cache_len = key_states.shape[-2]
 
-    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
+    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_cache_len):
         raise ValueError(
-            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
+            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_cache_len)}, but is"
             f" {attn_weights.size()}"
         )
 
+    attention_mask = _align_attention_mask(attention_mask, kv_cache_len)
     if attention_mask is not None:
-        if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
+        if attention_mask.size() != (bsz, 1, q_len, kv_cache_len):
             raise ValueError(
-                f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
+                f"Attention mask should be of size {(bsz, 1, q_len, kv_cache_len)}, but is {attention_mask.size()}"
             )
 
         attn_weights = attn_weights + attention_mask
