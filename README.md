@@ -123,6 +123,18 @@ sh scripts/scripts_longBench/eval.sh
 
 ```
 
+To compare decoding latency and peak memory for a single prompt, use:
+
+```bash
+python scripts/benchmark_latency_memory.py \
+    --model_path /path/to/model \
+    --method pyramidkv \
+    --attn_implementation flash_attention_2 \
+    --max_capacity_prompt 512 \
+    --max_new_tokens 256 \
+    --repeat 3
+```
+
 ## Needle in haystack
 
 We support inference code on `Needle in haystack` to repuduce our result.
