@@ -1,0 +1,49 @@
+# KV Cache Algorithm Backlog
+
+Evidence date: 2026-06-23.
+
+This backlog tracks representative KV cache algorithms to keep or implement in KVCache-Factory and its nano-vllm / mini-sglang ports. GitHub star counts were checked with the GitHub API; citation counts are approximate and were checked with OpenAlex or Semantic Scholar when available.
+
+## Selection Rules
+
+- Prefer methods with high citations, high GitHub stars, or broad baseline usage.
+- Prefer mechanism diversity over near-duplicate implementations.
+- Implement first in KVCache-Factory, then port the same algorithm contract to the runtime forks.
+- Record whether a method is already implemented, partially implemented, or missing.
+
+## Current Coverage
+
+| Category | Method | Representative signal | Status |
+| --- | --- | --- | --- |
+| Compression | StreamingLLM | `mit-han-lab/streaming-llm`: 7231 stars; ICLR 2024; attention sinks baseline | Implemented |
+| Compression/retrieval | H2O | `FMInference/H2O`: 523 stars; NeurIPS 2023 heavy-hitter baseline | Implemented |
+| Retrieval/compression | SnapKV | `FasterDecoding/SnapKV`: 321 stars; NeurIPS 2024; observation-window selection | Implemented |
+| Compression/budgeting | PyramidKV | `Zefan-Cai/KVCache-Factory`: 1346 stars; project core method | Implemented |
+| Adaptive compression | AdaKV | `FFY0/AdaKV`: 134 stars; NeurIPS 2025; head-adaptive budgets | Implemented |
+| Adaptive retrieval | HeadKV | Semantic Scholar: 84 citations for arXiv:2410.19258; ICLR 2025 | Implemented |
+| Retrieval/compression | L2Norm | EMNLP 2024; simple norm-based baseline | Implemented |
+| Merge | LOOK-M pivot merge | EMNLP Findings 2024; `SUSTechBruce/LOOK-M`: 103 stars | Partially implemented (`--merge pivot`) |
+| Quantization | KVQuant-style outlier path | `squeezeailab/kvquant`: 427 stars; NeurIPS 2024 | Partially implemented (`--quant_method kvquant`) |
+| Sparse prefill | MInference | `microsoft/MInference`: 1220 stars; NeurIPS 2024 Spotlight | Partially integrated |
+
+## Priority Candidates
+
+| Priority | Category | Method | Evidence | Implementation target |
+| --- | --- | --- | --- | --- |
+| P0 | Quantization | KIVI | `jy-yuan/KIVI`: 411 stars; ICML 2024; asymmetric 2-bit KV quantization | Add explicit KIVI cache class/config so `--quant_method kivi` is not just a generic quantized cache alias. |
+| P0 | Retrieval | Quest | `mit-han-lab/quest`: 397 stars; ICML 2024; query-aware sparse KV retrieval | Add query-aware block/token selector for decode attention and a prompt-time approximation path. |
+| P0 | Merge | KVMerger | OpenReview/arXiv 2024; adaptive token-level KV merging | Add merge set identification and weighted merge, complementing existing LOOK-M-style pivot merge. |
+| P1 | Compression | NACL | ACL 2024; single-operation encoding-time eviction | Add one-shot prompt eviction with proxy-token and random-token compensation. |
+| P1 | Compression | Scissorhands | arXiv 2023; persistence-of-importance eviction baseline | Add decode-time fixed-budget eviction using historical importance persistence. |
+| P1 | Cross-layer compression | MiniCache | arXiv 2024; depth-dimension KV compression | Add adjacent-layer sharing/compression prototype with strict shape tests. |
+| P1 | Quantization | GEAR | arXiv 2024; near-lossless KV compression recipe | Add low-rank/residual quantization prototype if it fits the current cache abstraction. |
+| P2 | Systems compression | CacheGen | SIGCOMM 2024; 72 OpenAlex citations; `UChi-JCL/CacheGen`: 159 stars | Track for cache serialization/streaming rather than first-pass in-model attention. |
+| P2 | Library baseline | NVIDIA kvpress | `NVIDIA/kvpress`: 1116 stars and active in 2026 | Use as an interoperability/reference baseline; do not blindly copy its API. |
+| P2 | Quantization | TurboQuant | ICLR 2026; Google Research; strong new quantization idea but low citation age | Track after KIVI/KVQuant/GEAR unless a compact reference implementation becomes mature. |
+
+## Runtime Porting Notes
+
+- KVCache-Factory can use Hugging Face monkeypatches; nano-vllm and mini-sglang need runtime-native integration.
+- For nano-vllm, preserve block-table and cache allocation invariants before pruning or merging tokens.
+- For mini-sglang, preserve prefix-sharing/radix-cache semantics before modifying cache contents.
+- Every method needs at least synthetic shape/budget tests in all target repos before GPU benchmarking.
