@@ -8,6 +8,7 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from typing import List
+from pyramidkv.quantization import build_quantized_cache_config, patch_quantized_cache
 
 
 context_length_list = [4096]
@@ -167,7 +168,17 @@ def main(args):
                 model.model.layers[i].self_attn.config.pooling = pooling
 
         context_length = batch_input_ids.shape[-1]
-        if args.quant_method == None:        
+        cache_config = build_quantized_cache_config(
+            args.quant_method,
+            nbits=args.nbits,
+            residual_length=args.quant_residual_length or output_max_len,
+            device=args.quant_device,
+            backend=args.quant_backend,
+            q_group_size=args.q_group_size,
+            axis_key=args.axis_key,
+            axis_value=args.axis_value,
+        )
+        if cache_config is None:
             output = model.generate(
                 **tokenized_prompts,
                 output_attentions = args.output_attentions,
@@ -189,7 +200,7 @@ def main(args):
                 min_length=context_length+1,
                 eos_token_id=[tokenizer.eos_token_id],
                 cache_implementation="quantized", 
-                cache_config={"nbits": args.nbits, "backend": "HQQ","device":"cuda","residual_length":output_max_len,"axis_key":1,"q_group_size":64},
+                cache_config=cache_config,
             )
 
         batch_outputs =tokenizer.batch_decode([output[0][context_length:]], skip_special_tokens=True)
@@ -237,6 +248,12 @@ if __name__ == "__main__":
     parser.add_argument("--method", type=str,  default=None)
     parser.add_argument("--quant_method",type=str,default=None,choices=["kivi","kvquant"])
     parser.add_argument("--nbits", type=int, default=8, help="")
+    parser.add_argument("--quant_backend", type=str, default="hqq", choices=["hqq", "quanto"], help="Quantized cache backend.")
+    parser.add_argument("--quant_device", type=str, default="cuda", help="Device used by the quantized cache backend.")
+    parser.add_argument("--quant_residual_length", type=int, default=None, help="Full-precision residual window for quantized cache; defaults to max_new_tokens.")
+    parser.add_argument("--q_group_size", type=int, default=64, help="Quantization group size.")
+    parser.add_argument("--axis_key", type=int, default=None, choices=[0, 1], help="Override key quantization axis.")
+    parser.add_argument("--axis_value", type=int, default=None, choices=[0, 1], help="Override value quantization axis.")
     parser.add_argument("--max_capacity_prompts", type=int, default=512, help="")
     parser.add_argument("--max_capacity_prompts_ratio", type=float, default=-1, help="")
     parser.add_argument("--steps", type=int, default=-1, help="maximum number of examples to evaluate per task.")
@@ -256,10 +273,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     set_seed(args.seed)
-    if args.quant_method == "kvquant":
-        from pyramidkv.quantcache import KVQuantizedCache
-        from transformers import cache_utils
-        cache_utils.HQQQuantizedCache = KVQuantizedCache
+    patch_quantized_cache(args.quant_method)
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_path,
         use_fast=args.use_fast_tokenizer,

@@ -103,6 +103,9 @@ Common arguments:
 - `--merge`: optional merge strategy such as `pivot`.
 - `--quant_method`: optional quantized cache path, `kivi` or `kvquant`.
 - `--nbits`: quantization bit width when `--quant_method` is set.
+- `--quant_backend`: quantized cache backend, `hqq` by default.
+- `--quant_residual_length`: full-precision residual cache window; defaults to `max_new_tokens`.
+- `--q_group_size`, `--axis_key`, `--axis_value`: advanced quantization layout controls. KIVI defaults to key axis `1` and value axis `0`.
 
 The helper script accepts:
 
@@ -171,6 +174,7 @@ python scripts/benchmark_latency_memory.py \
 - [x] Support SDPA cache compression for GPUs without FlashAttention v2.
 - [x] Support multi-GPU inference for 70B Llama-3.
 - [x] Add cache quantization options.
+- [x] Add explicit KIVI-style asymmetric quantized cache configuration.
 - [x] Add KV merge options.
 - [ ] Add more representative high-citation/high-star KV cache algorithms.
 - [ ] Support Mixtral.

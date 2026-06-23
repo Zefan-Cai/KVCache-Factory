@@ -23,6 +23,7 @@ This backlog tracks representative KV cache algorithms to keep or implement in K
 | Adaptive retrieval | HeadKV | Semantic Scholar: 84 citations for arXiv:2410.19258; ICLR 2025 | Implemented |
 | Retrieval/compression | L2Norm | EMNLP 2024; simple norm-based baseline | Implemented |
 | Merge | LOOK-M pivot merge | EMNLP Findings 2024; `SUSTechBruce/LOOK-M`: 103 stars | Partially implemented (`--merge pivot`) |
+| Quantization | KIVI-style HQQ cache config | `jy-yuan/KIVI`: 411 stars; ICML 2024; key per-channel/value per-token axis defaults | Implemented config path (`--quant_method kivi`) |
 | Quantization | KVQuant-style outlier path | `squeezeailab/kvquant`: 427 stars; NeurIPS 2024 | Partially implemented (`--quant_method kvquant`) |
 | Sparse prefill | MInference | `microsoft/MInference`: 1220 stars; NeurIPS 2024 Spotlight | Partially integrated |
 
@@ -30,9 +31,9 @@ This backlog tracks representative KV cache algorithms to keep or implement in K
 
 | Priority | Category | Method | Evidence | Implementation target |
 | --- | --- | --- | --- | --- |
-| P0 | Quantization | KIVI | `jy-yuan/KIVI`: 411 stars; ICML 2024; asymmetric 2-bit KV quantization | Add explicit KIVI cache class/config so `--quant_method kivi` is not just a generic quantized cache alias. |
 | P0 | Retrieval | Quest | `mit-han-lab/quest`: 397 stars; ICML 2024; query-aware sparse KV retrieval | Add query-aware block/token selector for decode attention and a prompt-time approximation path. |
 | P0 | Merge | KVMerger | OpenReview/arXiv 2024; adaptive token-level KV merging | Add merge set identification and weighted merge, complementing existing LOOK-M-style pivot merge. |
+| P1 | Quantization | KIVI kernel parity | `jy-yuan/KIVI`: 411 stars; ICML 2024; asymmetric 2-bit KV quantization | Replace or augment the HQQ config path with official-kernel-equivalent packing/dequantization if needed for performance parity. |
 | P1 | Compression | NACL | ACL 2024; single-operation encoding-time eviction | Add one-shot prompt eviction with proxy-token and random-token compensation. |
 | P1 | Compression | Scissorhands | arXiv 2023; persistence-of-importance eviction baseline | Add decode-time fixed-budget eviction using historical importance persistence. |
 | P1 | Cross-layer compression | MiniCache | arXiv 2024; depth-dimension KV compression | Add adjacent-layer sharing/compression prototype with strict shape tests. |
