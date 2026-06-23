@@ -15,7 +15,7 @@ This backlog tracks representative KV cache algorithms to keep or implement in K
 
 | Category | Method | Representative signal | Status |
 | --- | --- | --- | --- |
-| Compression | StreamingLLM | `mit-han-lab/streaming-llm`: 7231 stars; ICLR 2024; attention sinks baseline | Implemented |
+| Compression | StreamingLLM | `mit-han-lab/streaming-llm`: 7231 stars; ICLR 2024; attention sinks baseline | Implemented; decode-time runtime policy wired in nano-vllm/mini-sglang |
 | Compression/retrieval | H2O | `FMInference/H2O`: 523 stars; NeurIPS 2023 heavy-hitter baseline | Implemented |
 | Retrieval/compression | SnapKV | `FasterDecoding/SnapKV`: 321 stars; NeurIPS 2024; observation-window selection | Implemented |
 | Retrieval | Quest | `mit-han-lab/quest`: 397 stars; ICML 2024; query-aware sparse KV retrieval | Implemented core page/token selector |
@@ -50,8 +50,9 @@ This backlog tracks representative KV cache algorithms to keep or implement in K
 ## Runtime Porting Notes
 
 - KVCache-Factory can use Hugging Face monkeypatches; nano-vllm and mini-sglang need runtime-native integration.
-- Nano-vllm status: `nanovllm.kvcache_factory` now contains CPU-tested core selectors for StreamingLLM/H2O/SnapKV/Quest/NACL/Scissorhands, MiniCache cross-layer merge/restore utilities, nearest-token merge for LOOK-M/KVMerger-style modes, and KIVI/KVQuant config metadata. Next step: wire these contracts into block-table/cache updates without breaking prefix-cache invariants.
-- Mini-sglang status: `minisgl.kvcache_factory` now contains the matching CPU-tested core selectors for StreamingLLM/H2O/SnapKV/Quest/NACL/Scissorhands, MiniCache cross-layer merge/restore utilities, nearest-token merge, and KIVI/KVQuant config metadata. Next step: wire these contracts into cache managers/attention backends while preserving radix-prefix sharing semantics.
+- Nano-vllm status: `nanovllm.kvcache_factory` now contains CPU-tested core selectors for StreamingLLM/H2O/SnapKV/Quest/NACL/Scissorhands, MiniCache cross-layer merge/restore utilities, nearest-token merge for LOOK-M/KVMerger-style modes, KIVI/KVQuant config metadata, and a decode-time StreamingLLM block-table policy. Next step: wire the remaining contracts into block-table/cache updates without breaking prefix-cache invariants.
+- Mini-sglang status: `minisgl.kvcache_factory` now contains the matching CPU-tested core selectors for StreamingLLM/H2O/SnapKV/Quest/NACL/Scissorhands, MiniCache cross-layer merge/restore utilities, nearest-token merge, KIVI/KVQuant config metadata, and a decode-time StreamingLLM page-table policy for FA/FI/TRTLLM backends. Next step: wire the remaining contracts into cache managers/attention backends while preserving radix-prefix sharing semantics.
 - For nano-vllm, preserve block-table and cache allocation invariants before pruning or merging tokens.
 - For mini-sglang, preserve prefix-sharing/radix-cache semantics before modifying cache contents.
+- StreamingLLM runtime caveat: nano-vllm retention is rounded to full KV blocks because its default paged cache uses 256-token blocks; mini-sglang is token-exact when `page_size=1`.
 - Every method needs at least synthetic shape/budget tests in all target repos before GPU benchmarking.
