@@ -21,6 +21,7 @@ KVCache-Factory is a unified playground for KV cache compression, retrieval, mer
 | `H2O` | Retrieval/compression | Heavy-hitter token retention. |
 | `SnapKV` | Retrieval/compression | Observation-window attention pooling. |
 | `Quest` | Query-aware retrieval | Page-level key min/max metadata and query-aware page/token selection. |
+| `NACL` | Encoding-time eviction | Proxy-token score reduction with optional random eviction. |
 | `PyramidKV` | Compression/budget allocation | Layer-wise pyramidal cache budget. |
 | `CAM` | Merge/compression | Cache merging with attention-informed value aggregation. |
 | `L2Norm` | Retrieval/compression | Norm-based token selection. |
@@ -179,6 +180,7 @@ python scripts/benchmark_latency_memory.py \
 - [x] Add KV merge options.
 - [x] Add KVMerger-style weighted nearest-neighbor merge and merge-shape tests.
 - [x] Add a tested Quest-style query-aware page/token selector contract.
+- [x] Add a tested NACL-style proxy/random eviction selector contract.
 - [ ] Add more representative high-citation/high-star KV cache algorithms.
 - [ ] Support Mixtral.
 - [ ] Support batch inference.
@@ -209,4 +211,4 @@ If you find **PyramidKV** or this project useful, please cite:
 
 ## Acknowledgement
 
-Thanks to [SnapKV](https://github.com/FasterDecoding/SnapKV), [H2O](https://github.com/FMInference/H2O), [StreamingLLM](https://github.com/mit-han-lab/streaming-llm), [Quest](https://github.com/mit-han-lab/quest), [AdaKV](https://github.com/FFY0/AdaKV), and related open-source KV cache projects for making this research area easier to build on.
+Thanks to [SnapKV](https://github.com/FasterDecoding/SnapKV), [H2O](https://github.com/FMInference/H2O), [StreamingLLM](https://github.com/mit-han-lab/streaming-llm), [Quest](https://github.com/mit-han-lab/quest), [NACL](https://aclanthology.org/2024.acl-long.428/), [AdaKV](https://github.com/FFY0/AdaKV), and related open-source KV cache projects for making this research area easier to build on.
