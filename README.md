@@ -71,7 +71,7 @@ torch
 flash-attn>=2.4.0.post1
 ```
 
-Install the complete dependency set with `requirements.txt`. `flash-attn` is optional when using `--attn_implementation sdpa` or `eager`, but required for FlashAttention v2 experiments.
+Install the complete dependency set with `requirements.txt`. `flash-attn` is optional when using `--attn_implementation sdpa` or `eager`, but required for FlashAttention v2 experiments; install it manually after `torch` with `pip install flash-attn --no-build-isolation`. The optional MInference integration (`--method minference`) is kept out of the base requirements — install it with `pip install -r requirements-minference.txt`.
 
 ## Installation
 
@@ -92,18 +92,24 @@ export CUDA_VISIBLE_DEVICES=0
 python3 run_longbench.py \
   --method pyramidkv \
   --model_path /path/to/Llama-3-8B-Instruct \
-  --max_capacity_prompts 512 \
+  --max_capacity_prompts 128 \
   --attn_implementation flash_attention_2 \
   --save_dir ./results_long_bench \
   --use_cache True
 ```
 
+The quickstart uses a budget of `128`; the PyramidKV paper reports results at budgets of `128` and `2048`.
+
 Common arguments:
 
 - `--method`: `FullKV`, `pyramidkv`, `snapkv`, `streamingllm`, `h2o`, `cam`, `l2norm`, `adakv`, `headkv`, `think`, or `minference`.
 - `--model_path`: local or Hugging Face model path.
-- `--attn_implementation`: `flash_attention_2`, `sdpa`, or `eager`.
+- `--datasets`: comma-separated LongBench datasets to evaluate (e.g. `--datasets narrativeqa,qasper`); defaults to the full 16-dataset list.
+- `--attn_implementation`: `flash_attention_2`, `sdpa`, or `eager`. `--method think` requires `eager`.
+- `--dtype`: `float16` (default), `bfloat16`, or `auto`.
 - `--max_capacity_prompts`: target KV cache budget per layer. PyramidKV redistributes the total budget across layers.
+- `--kv_cache_granularity`: `query_head` (default, legacy layout) or `kv_head` (GQA-efficient layout; supported for `snapkv`, `pyramidkv`, `h2o`, `streamingllm`, `cam`, `l2norm`). See `docs/gqa_cache_layout.md`.
+- `--gqa_score_agg`: `mean` (default), `max`, or `sum`; how per-query-head scores are aggregated per KV head when `--kv_cache_granularity kv_head`.
 - `--merge`: optional merge strategy, `pivot` or `weighted`.
 - `--quant_method`: optional quantized cache path, `kivi`, `kvquant`, or `gear`.
 - `--nbits`: quantization bit width when `--quant_method` is set.
@@ -115,7 +121,7 @@ The helper script accepts:
 
 ```bash
 bash scripts/scripts_longBench/eval.sh \
-  0 pyramidkv 512 flash_attention_2 ./ /path/to/model none none 8
+  0 pyramidkv 128 flash_attention_2 ./ /path/to/model none none 8
 ```
 
 Argument order is `CUDA_VISIBLE_DEVICES`, `method`, `max_capacity_prompts`, `attn_implementation`, `source_path`, `model_path`, `merge_method`, `quant_method`, `nbits`.
@@ -165,6 +171,11 @@ python scripts/benchmark_latency_memory.py \
 
 ## Reproducibility Notes
 
+- Llama-3 LongBench runs now apply the official LongBench chat template (`<|begin_of_text|>...<|eot_id|>` user/assistant wrap on non-few-shot datasets) and stop on both Llama-3 terminators (`<|eot_id|>` and `<|end_of_text|>`). Earlier revisions used a single EOS id and no Llama-3 chat wrap, which depressed scores (issue #46); scores from earlier revisions are not directly comparable.
+- `transformers` is pinned to `4.44.2`; the attention monkeypatches are version-sensitive.
+- KV quantization (`--quant_method`) and KV merging (`--merge`) are OFF by default; the helper scripts only enable them when the corresponding arguments are set to something other than `none`.
+- Each LongBench run writes a `run_meta.json` (git commit, full argument list, library versions, timestamp) into the per-model results directory.
+- `--eval_batch_size` must stay at `1`; batching is not supported yet and larger values are rejected at startup.
 - LongBench and RULER use `7500` as the default Llama-3 prompt truncation length, matching the LongBench safety margin for 8K-context Llama-3 models.
 - Needle-in-a-haystack context files are loaded in sorted order so runs do not depend on filesystem-specific `glob` ordering.
 - The monkey-patched generation path resets per-layer `kv_seq_len` whenever a new empty cache is prepared. This prevents stale sequence-length state from leaking across independent `generate()` calls on the same model instance.

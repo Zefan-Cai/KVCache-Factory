@@ -1,6 +1,7 @@
 import os
 import json
 import argparse
+import traceback
 import numpy as np
 
 from metrics import (
@@ -139,13 +140,14 @@ if __name__ == '__main__':
                     for line in f:
                         try:
                             data = json.loads(line)
-                            predictions.append(data["pred"])
-                            answers.append(data["answers"])
-                            all_classes = data["all_classes"]
-                            if "length" in data:
-                                lengths.append(data["length"])
-                        except:
-                            print("error")
+                        except json.JSONDecodeError:
+                            print(f"WARNING: skipping malformed JSON line in {args.eval_file}")
+                            continue
+                        predictions.append(data["pred"])
+                        answers.append(data["answers"])
+                        all_classes = data["all_classes"]
+                        if "length" in data:
+                            lengths.append(data["length"])
                 if args.longbench_e:
                     score = scorer_e(args.dataset, predictions, answers, lengths, all_classes)
                 else:
@@ -172,11 +174,12 @@ if __name__ == '__main__':
                     json.dump(scores, f, ensure_ascii=False, indent=4)
             
                 print(f"dataset {args.dataset} method {args.method} scores {scores}")
-            except:
-                
+            except FileNotFoundError:
                 results_list[idx+1].append(-1)
-                
-                print(f"dataset {args.dataset} method {args.method} scores {None}")
+                print(f"WARNING: missing predictions for {method}/{dataset} ({args.eval_file}); recording -1")
+            except Exception:
+                traceback.print_exc()
+                raise
                 
     import csv
     with open(os.path.join(args.results_dir,f"results.csv"), 'w') as fp:

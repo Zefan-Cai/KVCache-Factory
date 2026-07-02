@@ -11,11 +11,15 @@ rouge
 fuzzywuzzy
 python-Levenshtein
 protobuf
--i https://pypi.org/simple/ bitsandbytes
+bitsandbytes
 openai
 anthropic
 seaborn
 matplotlib
 
-# minference
---config-settings=--no-build-isolation git+https://github.com/microsoft/MInference.git@yucheng/kvcompression
+# flash-attn must be installed manually AFTER torch (it needs torch at build time):
+#   pip install flash-attn --no-build-isolation
+# It is optional when using --attn_implementation sdpa or eager.
+
+# The optional MInference integration lives in requirements-minference.txt:
+#   pip install -r requirements-minference.txt

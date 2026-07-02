@@ -11,6 +11,7 @@ import jieba
 
 import json
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from pyramidkv.eval_utils import build_stop_token_ids
 from anthropic import Anthropic
 import numpy as np
 import argparse
@@ -285,7 +286,7 @@ class LLMNeedleHaystackTester:
                 num_beams=1,
                 do_sample=False,
                 temperature=1.0,
-                eos_token_id=[self.enc.eos_token_id, self.enc.encode("\n", add_special_tokens=False)[-1]]
+                eos_token_id=build_stop_token_ids(self.model_to_test, self.enc) + [self.enc.encode("\n", add_special_tokens=False)[-1]]
             )
             response = self.enc.decode(output_ids[0][input_ids.shape[1]:], skip_special_tokens=True).strip()
 

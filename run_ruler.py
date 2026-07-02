@@ -7,6 +7,7 @@ import torch
 
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from pyramidkv.eval_utils import str2bool, build_stop_token_ids
 from typing import List
 from pyramidkv.quantization import build_quantized_cache_config, patch_quantized_cache
 
@@ -56,7 +57,7 @@ def build_chat(prompt):
         return prompt
 
 # def build_prompt(prompt, dataset):
-    
+
 #     SYSTEM_PROMPT = model2prompt[dataset]
 
 #     prompt = f"<<SYS>>\n {SYSTEM_PROMPT} \n<</SYS>>\n\n{prompt}"
@@ -144,7 +145,7 @@ def main(args):
             max_capacity_prompts = round(batch_input_ids.shape[1] * args.max_capacity_prompts_ratio)
         
         
-        if args.method != "FullKV":
+        if args.method.lower() != "fullkv":
             if args.method.lower() in ["snapkv","pyramidkv","h2o","cam", "l2norm"]:
                 window_sizes = 8
             elif args.method.lower() in ["streamingllm"]:
@@ -187,7 +188,7 @@ def main(args):
                 do_sample=False,
                 temperature=1.0,
                 min_length=context_length+1,
-                eos_token_id=[tokenizer.eos_token_id]
+                eos_token_id=list(stop_token_ids)
             )
         else:
             output = model.generate(
@@ -198,26 +199,24 @@ def main(args):
                 do_sample=False,
                 temperature=1.0,
                 min_length=context_length+1,
-                eos_token_id=[tokenizer.eos_token_id],
-                cache_implementation="quantized", 
+                eos_token_id=list(stop_token_ids),
+                cache_implementation="quantized",
                 cache_config=cache_config,
             )
 
-        batch_outputs =tokenizer.batch_decode([output[0][context_length:]], skip_special_tokens=True)
-        batch_generations = batch_outputs
+        # eval_batch_size is validated to be 1 at startup, so only sample 0 exists.
+        batch_generations = tokenizer.batch_decode([output[0][context_length:]], skip_special_tokens=True)
 
         torch.cuda.empty_cache()
-        
-        for j in range(args.eval_batch_size):
-            
-            example = {}
-            example["prompt"] = batch_prompts[j]
-            example["input"] = batch_inputs[j]
-            example["answers"] = batch_answers[j]
-            example["pred"] = batch_generations[j]
-            example["length"] = batch_lengths[j]
 
-            fout.write(json.dumps(example) + "\n")
+        example = {}
+        example["prompt"] = batch_prompts[0]
+        example["input"] = batch_inputs[0]
+        example["answers"] = batch_answers[0]
+        example["pred"] = batch_generations[0]
+        example["length"] = batch_lengths[0]
+
+        fout.write(json.dumps(example) + "\n")
     
     
 
@@ -233,8 +232,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--model_name", type=str, default=None, help="if specified, we will load the model to generate the predictions.")
     parser.add_argument("--model_path", type=str, default=None, help="if specified, we will load the model to generate the predictions.")
-    parser.add_argument("--use_fast_tokenizer", type=bool, default=True, help="")
-    parser.add_argument("--output_attentions", type=bool, default=False, help="")
+    parser.add_argument("--use_fast_tokenizer", type=str2bool, default=True, help="")
+    parser.add_argument("--output_attentions", type=str2bool, default=False, help="")
     
     parser.add_argument("--max_num_examples", type=int, default=None, help="maximum number of examples to evaluate per task.")
     parser.add_argument("--sample_method", type=str, default="topk", choices=["random", "topk"], help="how to sample the examples.")
@@ -243,7 +242,7 @@ if __name__ == "__main__":
     
     parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
     
-    parser.add_argument("--use_cache", type=bool, default=True, help="")
+    parser.add_argument("--use_cache", type=str2bool, default=True, help="")
     parser.add_argument("--attn_implementation", type=str,  default="flash_attention_2", choices=["flash_attention_2", "sdpa", "eager"])
     parser.add_argument("--method", type=str,  default=None)
     parser.add_argument("--quant_method",type=str,default=None,choices=["kivi","kvquant"])
@@ -271,7 +270,14 @@ if __name__ == "__main__":
     )
     
     args = parser.parse_args()
-    
+
+    if args.eval_batch_size != 1:
+        raise ValueError("eval_batch_size != 1 is not supported yet: truncation and decoding only handle sample 0, so batching silently corrupts predictions - see issue #46.")
+
+    ruler_supported_methods = ["fullkv", "snapkv", "pyramidkv", "h2o", "cam", "l2norm", "streamingllm"]
+    if args.method.lower() not in ruler_supported_methods:
+        raise ValueError(f"method {args.method!r} is not supported on RULER; supported methods: {ruler_supported_methods}")
+
     set_seed(args.seed)
     patch_quantized_cache(args.quant_method)
     tokenizer = AutoTokenizer.from_pretrained(
@@ -300,7 +306,9 @@ if __name__ == "__main__":
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
     model.eval()
-    
+
+    stop_token_ids = build_stop_token_ids(model, tokenizer)
+
     save_dir = args.save_dir
     max_capacity_prompts = args.max_capacity_prompts
     

@@ -1,0 +1,6 @@
+# Optional MInference integration (only needed for --method minference).
+# Install after the base requirements.txt and torch:
+#   pip install -r requirements-minference.txt
+# Note: the build requires torch to be present; if the build fails, retry with
+#   pip install --no-build-isolation -r requirements-minference.txt
+git+https://github.com/microsoft/MInference.git@yucheng/kvcompression
