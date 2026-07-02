@@ -2347,8 +2347,8 @@ def llama_flash_attn2_forward_AdaKV(
 
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
@@ -2408,12 +2408,20 @@ def llama_flash_attn2_forward_AdaKV(
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
             # NOTE: update meta data
-            self.kv_cluster.klen_sum += self.num_heads
+            # head_lens has one entry per STORED head: num_heads in the default
+            # query_head granularity (kv_groups == 1, identical to legacy code),
+            # num_key_value_heads in kv_head granularity.
+            num_cached_heads = self.kv_cluster.head_lens.shape[0]
+            kv_groups = self.num_heads // num_cached_heads
+            self.kv_cluster.klen_sum += num_cached_heads
             self.kv_cluster.max_seqlen_k += 1
             self.kv_cluster.cu_klen += self.kv_cluster.cu_offset
             self.kv_cluster.head_lens += 1
 
-            query_states = query_states.view(-1, 1, self.head_dim)
+            # varlen layout: one sequence per stored head; each q block carries the
+            # kv_groups query heads of that kv head (repeat_kv order is kv-major),
+            # attending to its own 1-headed flattened cache segment (GQA/MQA).
+            query_states = query_states.view(num_cached_heads, kv_groups, self.head_dim)
             key_states = key_states.view(-1,1,self.head_dim)
             value_states = value_states.view(-1,1,self.head_dim)
 
@@ -2492,8 +2500,8 @@ def llama_flash_attn2_forward_HeadKV(
 
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
@@ -2553,12 +2561,20 @@ def llama_flash_attn2_forward_HeadKV(
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
             # NOTE: update meta data
-            self.kv_cluster.klen_sum += self.num_heads
+            # head_lens has one entry per STORED head: num_heads in the default
+            # query_head granularity (kv_groups == 1, identical to legacy code),
+            # num_key_value_heads in kv_head granularity.
+            num_cached_heads = self.kv_cluster.head_lens.shape[0]
+            kv_groups = self.num_heads // num_cached_heads
+            self.kv_cluster.klen_sum += num_cached_heads
             self.kv_cluster.max_seqlen_k += 1
             self.kv_cluster.cu_klen += self.kv_cluster.cu_offset
             self.kv_cluster.head_lens += 1
 
-            query_states = query_states.view(-1, 1, self.head_dim)
+            # varlen layout: one sequence per stored head; each q block carries the
+            # kv_groups query heads of that kv head (repeat_kv order is kv-major),
+            # attending to its own 1-headed flattened cache segment (GQA/MQA).
+            query_states = query_states.view(num_cached_heads, kv_groups, self.head_dim)
             key_states = key_states.view(-1,1,self.head_dim)
             value_states = value_states.view(-1,1,self.head_dim)
 

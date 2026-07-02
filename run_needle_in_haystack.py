@@ -61,9 +61,11 @@ class LLMNeedleHaystackTester:
                  seconds_to_sleep_between_completions = None,
                  print_ongoing_status = True, 
                  step=100, 
-                 method='pyramidkv', 
+                 method='pyramidkv',
                  attn_implementation='flash_attention_2',
-                 max_capacity_prompt=128):
+                 max_capacity_prompt=128,
+                 kv_cache_granularity='query_head',
+                 gqa_score_agg='mean'):
         """        
         :param needle: The needle to be found in the haystack. Default is None.
         :param haystack_dir: The directory of text files to use as background context (or a haystack) in which the needle is to be found. Default is Paul Graham Essays.
@@ -108,6 +110,8 @@ class LLMNeedleHaystackTester:
         self.method = method
         self.max_capacity_prompts = max_capacity_prompt
         self.attn_implementation = attn_implementation
+        self.kv_cache_granularity = kv_cache_granularity
+        self.gqa_score_agg = gqa_score_agg
 
 
         self.model_version = model_version
@@ -204,6 +208,8 @@ class LLMNeedleHaystackTester:
                     self.model_to_test.model.layers[i].self_attn.config.max_capacity_prompt = max_capacity_prompts[i]
                     self.model_to_test.model.layers[i].self_attn.config.kernel_size = kernel_sizes[i]
                     self.model_to_test.model.layers[i].self_attn.config.pooling = pooling
+                    self.model_to_test.model.layers[i].self_attn.config.kv_cache_granularity = self.kv_cache_granularity
+                    self.model_to_test.model.layers[i].self_attn.config.gqa_score_agg = self.gqa_score_agg
                     
                 
                 # self.model_to_test = tp.tensor_parallel(self.model_to_test, sharded=True)
@@ -508,7 +514,12 @@ if __name__ == "__main__":
     parser.add_argument('--step', type=int, default=1000)
     parser.add_argument('--method', type=str, default="full", choices=['full', 'pyramidkv', 'snapkv', 'streamingllm', 'h2o', 'cam'])
     parser.add_argument('--max_capacity_prompt', type=int, default=128)
+    parser.add_argument('--kv_cache_granularity', type=str, default='query_head', choices=['query_head', 'kv_head'], help='Granularity of the compressed KV cache (see docs/gqa_cache_layout.md).')
+    parser.add_argument('--gqa_score_agg', type=str, default='mean', choices=['mean', 'max', 'sum'], help='How per-query-head scores are aggregated per KV head when kv_cache_granularity=kv_head.')
     args = parser.parse_args()
+
+    if args.kv_cache_granularity == 'kv_head' and args.method.lower() not in ['snapkv', 'pyramidkv', 'h2o', 'streamingllm', 'cam', 'l2norm', 'adakv', 'headkv']:
+        raise ValueError(f"kv_cache_granularity='kv_head' is not supported for method {args.method!r}; supported methods: snapkv, pyramidkv, h2o, streamingllm, cam, l2norm, adakv, headkv.")
 
     
 
@@ -524,7 +535,9 @@ if __name__ == "__main__":
                                  step=args.step, 
                                  method=args.method, 
                                  max_capacity_prompt=args.max_capacity_prompt,
-                                 attn_implementation=args.attn_implementation
+                                 attn_implementation=args.attn_implementation,
+                                 kv_cache_granularity=args.kv_cache_granularity,
+                                 gqa_score_agg=args.gqa_score_agg
                                  )
 
     ht.start_test(args)

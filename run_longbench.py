@@ -445,8 +445,8 @@ if __name__ == "__main__":
     if args.method.lower() == "think" and args.attn_implementation != "eager":
         raise ValueError("method 'think' only patches the eager attention path; with --attn_implementation flash_attention_2/sdpa it silently runs stock HF attention. Use --attn_implementation eager.")
 
-    if args.kv_cache_granularity == "kv_head" and args.method.lower() not in ["snapkv", "pyramidkv", "h2o", "streamingllm", "cam", "l2norm"]:
-        raise ValueError(f"kv_cache_granularity='kv_head' is not supported for method {args.method!r}; supported methods: snapkv, pyramidkv, h2o, streamingllm, cam, l2norm.")
+    if args.kv_cache_granularity == "kv_head" and args.method.lower() not in ["snapkv", "pyramidkv", "h2o", "streamingllm", "cam", "l2norm", "adakv", "headkv"]:
+        raise ValueError(f"kv_cache_granularity='kv_head' is not supported for method {args.method!r}; supported methods: snapkv, pyramidkv, h2o, streamingllm, cam, l2norm, adakv, headkv.")
 
     datasets_arg = args.datasets or args.dataset
     if datasets_arg:

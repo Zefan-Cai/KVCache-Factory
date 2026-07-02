@@ -167,6 +167,8 @@ def main(args):
                 model.model.layers[i].self_attn.config.max_capacity_prompt = max_capacity_prompts[i]
                 model.model.layers[i].self_attn.config.kernel_size = kernel_sizes[i]
                 model.model.layers[i].self_attn.config.pooling = pooling
+                model.model.layers[i].self_attn.config.kv_cache_granularity = args.kv_cache_granularity
+                model.model.layers[i].self_attn.config.gqa_score_agg = args.gqa_score_agg
 
         context_length = batch_input_ids.shape[-1]
         cache_config = build_quantized_cache_config(
@@ -256,6 +258,9 @@ if __name__ == "__main__":
     parser.add_argument("--max_capacity_prompts", type=int, default=512, help="")
     parser.add_argument("--max_capacity_prompts_ratio", type=float, default=-1, help="")
     parser.add_argument("--steps", type=int, default=-1, help="maximum number of examples to evaluate per task.")
+    parser.add_argument("--kv_cache_granularity", type=str, default="query_head", choices=["query_head", "kv_head"], help="Granularity of the compressed KV cache (see docs/gqa_cache_layout.md).")
+    parser.add_argument("--gqa_score_agg", type=str, default="mean", choices=["mean", "max", "sum"], help="How per-query-head scores are aggregated per KV head when kv_cache_granularity=kv_head.")
+    parser.add_argument("--context_lengths", type=str, default=None, help="Comma-separated RULER context lengths to evaluate (available: 4096, 8192, 16384). Defaults to 4096.")
     
     parser.add_argument(
         "--use_chat_format", 
@@ -277,6 +282,21 @@ if __name__ == "__main__":
     ruler_supported_methods = ["fullkv", "snapkv", "pyramidkv", "h2o", "cam", "l2norm", "streamingllm"]
     if args.method.lower() not in ruler_supported_methods:
         raise ValueError(f"method {args.method!r} is not supported on RULER; supported methods: {ruler_supported_methods}")
+
+    if args.kv_cache_granularity == "kv_head" and args.method.lower() not in ["snapkv", "pyramidkv", "h2o", "streamingllm", "cam", "l2norm", "adakv", "headkv"]:
+        raise ValueError(f"kv_cache_granularity='kv_head' is not supported for method {args.method!r}; supported methods: snapkv, pyramidkv, h2o, streamingllm, cam, l2norm, adakv, headkv.")
+
+    if args.context_lengths is not None:
+        available_context_lengths = [4096, 8192, 16384]
+        try:
+            context_length_list = [int(c.strip()) for c in args.context_lengths.split(",") if c.strip()]
+        except ValueError:
+            raise ValueError(f"--context_lengths must be a comma-separated list of integers, got {args.context_lengths!r}")
+        if not context_length_list:
+            raise ValueError("--context_lengths is empty; expected a comma-separated list such as '4096,8192'.")
+        invalid_context_lengths = [c for c in context_length_list if c not in available_context_lengths]
+        if invalid_context_lengths:
+            raise ValueError(f"context lengths {invalid_context_lengths} have no data/RULER subdir; available: {available_context_lengths}")
 
     set_seed(args.seed)
     patch_quantized_cache(args.quant_method)

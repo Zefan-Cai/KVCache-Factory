@@ -37,7 +37,7 @@ python3 run_longbench.py \
 
 - `--datasets`：逗号分隔的 LongBench 数据集列表（默认评测全部 16 个数据集）
 - `--dtype`：`float16`（默认）、`bfloat16` 或 `auto`
-- `--kv_cache_granularity`：`query_head`（默认，旧布局）或 `kv_head`（GQA 高效布局，仅支持 `snapkv`、`pyramidkv`、`h2o`、`streamingllm`、`cam`、`l2norm`），详见 `docs/gqa_cache_layout.md`
+- `--kv_cache_granularity`：`query_head`（默认，旧布局）或 `kv_head`（GQA 高效布局，支持 `snapkv`、`pyramidkv`、`h2o`、`streamingllm`、`cam`、`l2norm`，以及 `adakv`/`headkv`——GPU 验证待完成）；RULER（`run_ruler.py`）和大海捞针（`run_needle_in_haystack.py`）脚本也接受相同参数，详见 `docs/gqa_cache_layout.md`
 - `--gqa_score_agg`：`mean`（默认）、`max` 或 `sum`，`kv_head` 布局下每个 KV head 的打分聚合方式
 
 ## 复现备注

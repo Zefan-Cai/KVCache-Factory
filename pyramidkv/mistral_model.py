@@ -2746,8 +2746,8 @@ def mistral_flash_attn2_forward_AdaKV(
 
     # repeat k/v heads if n_kv_heads < n_heads
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -2822,17 +2822,26 @@ def mistral_flash_attn2_forward_AdaKV(
         else:
             self.kv_seq_len += q_len
 
+            # Number of head segments actually stored in the flatten cache:
+            # num query heads in query_head mode, num kv heads in kv_head mode.
+            num_cached_heads = self.kv_cluster.head_lens.shape[0]
+            kv_groups = self.num_heads // num_cached_heads
+
             cache_kwargs["head_lens"] = self.kv_cluster.head_lens
             cache_kwargs["cu_klen"] = self.kv_cluster.cu_klen
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
             # NOTE: update meta data
-            self.kv_cluster.klen_sum += self.num_heads
+            self.kv_cluster.klen_sum += num_cached_heads
             self.kv_cluster.max_seqlen_k += 1
             self.kv_cluster.cu_klen += self.kv_cluster.cu_offset
             self.kv_cluster.head_lens += 1
 
-            query_states = query_states.reshape(-1, 1, self.head_dim)
+            # One varlen sequence per stored head; in kv_head mode each carries its
+            # kv_groups query heads (GQA varlen: nheads_q % nheads_k == 0). repeat_kv
+            # order is kv-major/group-minor, so the contiguous reshape groups query
+            # heads j*kv_groups..(j+1)*kv_groups-1 with stored head j.
+            query_states = query_states.reshape(num_cached_heads, kv_groups, self.head_dim)
             key_states = key_states.reshape(-1,1,self.head_dim)
             value_states = value_states.reshape(-1,1,self.head_dim)
 
@@ -2912,8 +2921,8 @@ def mistral_flash_attn2_forward_HeadKV(
 
     # repeat k/v heads if n_kv_heads < n_heads
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -2990,17 +2999,26 @@ def mistral_flash_attn2_forward_HeadKV(
         else:
             self.kv_seq_len += q_len
 
+            # Number of head segments actually stored in the flatten cache:
+            # num query heads in query_head mode, num kv heads in kv_head mode.
+            num_cached_heads = self.kv_cluster.head_lens.shape[0]
+            kv_groups = self.num_heads // num_cached_heads
+
             cache_kwargs["head_lens"] = self.kv_cluster.head_lens
             cache_kwargs["cu_klen"] = self.kv_cluster.cu_klen
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
             # NOTE: update meta data
-            self.kv_cluster.klen_sum += self.num_heads
+            self.kv_cluster.klen_sum += num_cached_heads
             self.kv_cluster.max_seqlen_k += 1
             self.kv_cluster.cu_klen += self.kv_cluster.cu_offset
             self.kv_cluster.head_lens += 1
 
-            query_states = query_states.reshape(-1, 1, self.head_dim)
+            # One varlen sequence per stored head; in kv_head mode each carries its
+            # kv_groups query heads (GQA varlen: nheads_q % nheads_k == 0). repeat_kv
+            # order is kv-major/group-minor, so the contiguous reshape groups query
+            # heads j*kv_groups..(j+1)*kv_groups-1 with stored head j.
+            query_states = query_states.reshape(num_cached_heads, kv_groups, self.head_dim)
             key_states = key_states.reshape(-1,1,self.head_dim)
             value_states = value_states.reshape(-1,1,self.head_dim)
 

@@ -108,9 +108,13 @@ not by unit tests alone.
    in kv_head mode (25.6 vs 25.4 tok/s @2048). Accuracy parity accepted; the
    flag still defaults to `query_head` so published numbers stay
    reproducible.
-4. **Generalize.** `AdaKV`/`HeadKV`/`ThinK` still need per-head-budget redesign
-   and remain query-head-granular; `run_longbench.py` rejects
-   `--kv_cache_granularity kv_head` for them at startup.
+4. **Generalize.** `AdaKV`/`HeadKV` kv-head support is IMPLEMENTED (2026-07-02),
+   pending GPU validation. Budget semantics: the per-stored-head budget is
+   preserved, so total cache bytes shrink by `num_key_value_groups`; HeadKV's
+   per-query-head capacity tables are group-mean-reduced to per-KV-head
+   capacities. `run_longbench.py`, `run_ruler.py`, and
+   `run_needle_in_haystack.py` accept `--kv_cache_granularity kv_head` for
+   them. `ThinK` remains query-head-granular and is still rejected at startup.
 
 The query-head-granularity layout stays the default. This matches the
 maintainer's note on #49 that a correct refactor needs a wider audit rather

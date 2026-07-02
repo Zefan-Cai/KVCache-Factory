@@ -108,7 +108,7 @@ Common arguments:
 - `--attn_implementation`: `flash_attention_2`, `sdpa`, or `eager`. `--method think` requires `eager`.
 - `--dtype`: `float16` (default), `bfloat16`, or `auto`.
 - `--max_capacity_prompts`: target KV cache budget per layer. PyramidKV redistributes the total budget across layers.
-- `--kv_cache_granularity`: `query_head` (default, legacy layout) or `kv_head` (GQA-efficient layout; supported for `snapkv`, `pyramidkv`, `h2o`, `streamingllm`, `cam`, `l2norm`). See `docs/gqa_cache_layout.md`.
+- `--kv_cache_granularity`: `query_head` (default, legacy layout) or `kv_head` (GQA-efficient layout; supported for `snapkv`, `pyramidkv`, `h2o`, `streamingllm`, `cam`, `l2norm`, plus `adakv`/`headkv` — GPU validation pending). The RULER (`run_ruler.py`) and needle-in-a-haystack (`run_needle_in_haystack.py`) runners accept the same flags. See `docs/gqa_cache_layout.md`.
 - `--gqa_score_agg`: `mean` (default), `max`, or `sum`; how per-query-head scores are aggregated per KV head when `--kv_cache_granularity kv_head`.
 - `--merge`: optional merge strategy, `pivot` or `weighted`.
 - `--quant_method`: optional quantized cache path, `kivi`, `kvquant`, or `gear`.

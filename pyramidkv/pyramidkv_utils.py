@@ -946,10 +946,11 @@ class AdaKVCluster():
     '''
     adapt from https://github.com/FFY0/AdaKV.
     '''
-    def __init__(self, window_size = 32, kernel_size = 7, pooling = 'maxpool',max_capacity_prompt=None,floor = None,normalize=None, layer_idx = None, num_hidden_layers=None):
+    def __init__(self, window_size = 32, kernel_size = 7, pooling = 'maxpool',max_capacity_prompt=None,floor = None,normalize=None, layer_idx = None, num_hidden_layers=None, gqa_score_agg = 'mean'):
         self.window_size = window_size
         self.kernel_size = kernel_size
         self.pooling = pooling
+        self.gqa_score_agg = gqa_score_agg
         self.base_capacity = max_capacity_prompt - window_size
         self.floor_ratio = floor
         self.floor_capacity = int(self.base_capacity * self.floor_ratio)
@@ -969,6 +970,9 @@ class AdaKVCluster():
 
     def calcul_attn_sore(self, key_states, query_states):
         bsz, num_heads, q_len, head_dim = query_states.shape
+        groups = _gqa_groups(query_states, key_states)
+        # Transient repeat for the score matmul only (no-op when groups == 1).
+        key_states = repeat_kv(key_states, groups)
         attn_weights = torch.matmul(query_states[..., -self.window_size:, :], key_states.transpose(2, 3)) / math.sqrt(
             head_dim)
         mask = torch.full((self.window_size, self.window_size), torch.finfo(attn_weights.dtype).min,
@@ -982,6 +986,9 @@ class AdaKVCluster():
 
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
         attn_weights_mean = attn_weights[:, :, -self.window_size:, : -self.window_size].mean(dim=-2)
+        # Reduce to stored-head (kv-head) granularity BEFORE pooling, matching
+        # _grouped_window_attn_cache (no-op when groups == 1).
+        attn_weights_mean = _reduce_group_scores(attn_weights_mean, groups, self.gqa_score_agg)
         if self.pooling == 'avgpool':
             attn_weights_mean_pooling = F.avg_pool1d(attn_weights_mean, kernel_size=self.kernel_size,
                                                      padding=self.kernel_size // 2,
@@ -997,7 +1004,11 @@ class AdaKVCluster():
     def update_kv(self,  key_states, query_states, value_states):
         # check if prefix phase        assert key_states.shape[-2] == query_states.shape[-2]
         _device = key_states.device
-        bsz, num_heads, q_len, head_dim = query_states.shape
+        bsz, _, q_len, head_dim = query_states.shape
+        # Budget/metadata run over the ACTUAL stored head count: equals the query
+        # head count in query_head mode (bit-identical) and num_key_value_heads in
+        # kv_head mode (see docs/gqa_cache_layout.md).
+        num_heads = key_states.shape[1]
         attn_score= self.calcul_attn_sore(key_states,query_states)
         origin_heads_key_states = torch.split(key_states, 1, dim=1)
         origin_heads_value_states = torch.split(value_states, 1, dim=1)
@@ -1084,10 +1095,11 @@ class HeadKVCluster():
     '''
     adapt from https://github.com/FFY0/AdaKV.
     '''
-    def __init__(self, window_size = 32, kernel_size = 7, pooling = 'maxpool',max_capacity_prompt=None, layer_idx = None, num_hidden_layers=None, head_capacity=None):
+    def __init__(self, window_size = 32, kernel_size = 7, pooling = 'maxpool',max_capacity_prompt=None, layer_idx = None, num_hidden_layers=None, head_capacity=None, gqa_score_agg = 'mean'):
         self.window_size = window_size
         self.kernel_size = kernel_size
         self.pooling = pooling
+        self.gqa_score_agg = gqa_score_agg
         self.base_capacity = max_capacity_prompt - window_size
         self.head_adaptive_capacity = head_capacity
         self.num_hidden_layers = num_hidden_layers
@@ -1103,6 +1115,9 @@ class HeadKVCluster():
 
     def calcul_attn_sore(self, key_states, query_states):
         bsz, num_heads, q_len, head_dim = query_states.shape
+        groups = _gqa_groups(query_states, key_states)
+        # Transient repeat for the score matmul only (no-op when groups == 1).
+        key_states = repeat_kv(key_states, groups)
         attn_weights = torch.matmul(query_states[..., -self.window_size:, :], key_states.transpose(2, 3)) / math.sqrt(
             head_dim)
         mask = torch.full((self.window_size, self.window_size), torch.finfo(attn_weights.dtype).min,
@@ -1116,6 +1131,9 @@ class HeadKVCluster():
 
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
         attn_weights_mean = attn_weights[:, :, -self.window_size:, : -self.window_size].mean(dim=-2)
+        # Reduce to stored-head (kv-head) granularity BEFORE pooling, matching
+        # _grouped_window_attn_cache (no-op when groups == 1).
+        attn_weights_mean = _reduce_group_scores(attn_weights_mean, groups, self.gqa_score_agg)
         if self.pooling == 'avgpool':
             attn_weights_mean_pooling = F.avg_pool1d(attn_weights_mean, kernel_size=self.kernel_size,
                                                      padding=self.kernel_size // 2,
@@ -1131,7 +1149,11 @@ class HeadKVCluster():
     def update_kv(self,  key_states, query_states, value_states):
         # check if prefix phase        assert key_states.shape[-2] == query_states.shape[-2]
         _device = key_states.device
-        bsz, num_heads, q_len, head_dim = query_states.shape
+        bsz, _, q_len, head_dim = query_states.shape
+        # Budget/metadata run over the ACTUAL stored head count: equals the query
+        # head count in query_head mode (bit-identical) and num_key_value_heads in
+        # kv_head mode (see docs/gqa_cache_layout.md).
+        num_heads = key_states.shape[1]
         attn_score= self.calcul_attn_sore(key_states,query_states)
         origin_heads_key_states = torch.split(key_states, 1, dim=1)
         origin_heads_value_states = torch.split(value_states, 1, dim=1)
@@ -1163,6 +1185,19 @@ class HeadKVCluster():
         _,sorted_attn_score_indices = attn_score.sort(dim=-1,descending=True)
         sorted_attn_score_indices = sorted_attn_score_indices.split(1,dim=1)
 
+        # The head_capacity table is built per QUERY head (run_longbench.py). In
+        # kv_head mode, reduce each kv head's group of query-head capacities with
+        # MEAN (deliberate: keeps layer total == query_head total / groups, so
+        # --max_capacity_prompts means the same thing across granularities; max
+        # would give an unpredictable, table-dependent budget). repeat_kv maps
+        # query head h -> kv head h // groups, so the row-major reshape
+        # (num_kv_heads, groups) groups each kv head's own query heads. When
+        # groups == 1 this indexes the same row (bit-identical).
+        groups = _gqa_groups(query_states, key_states)
+        head_capacity_row = self.head_adaptive_capacity[self.layer_idx]
+        if groups > 1:
+            head_capacity_row = head_capacity_row.reshape(num_heads, groups).float().mean(dim=-1).round().to(head_capacity_row.dtype)
+
         heads_key_states = []
         heads_value_states = []
         assert bsz == 1
@@ -1175,7 +1210,7 @@ class HeadKVCluster():
         self.cu_klen = 0
 
         for head_idx in range(num_heads):
-            cache_index = sorted_attn_score_indices[head_idx][...,:self.head_adaptive_capacity[self.layer_idx][head_idx]]
+            cache_index = sorted_attn_score_indices[head_idx][...,:head_capacity_row[head_idx]]
 
             l = cache_index.shape[-1] + self.window_size
             k_lens.append(l)
@@ -1386,6 +1421,8 @@ def init_adakv(self):
             self.config.floor_ratio = 0.2
         if not hasattr(self.config, 'normalize'):
             self.config.normalize = True
+        if not hasattr(self.config, 'gqa_score_agg'):
+            self.config.gqa_score_agg = 'mean'
     # max_capacity_prompt --> base_capacity
     # init only once
     if not hasattr(self, "kv_cluster"):
@@ -1397,7 +1434,8 @@ def init_adakv(self):
             kernel_size = self.config.kernel_size,
             pooling = self.config.pooling,
             floor = self.config.floor_ratio,
-            normalize = self.config.normalize
+            normalize = self.config.normalize,
+            gqa_score_agg = getattr(self.config, 'gqa_score_agg', 'mean'),
             )
 
 
@@ -1413,6 +1451,8 @@ def init_headkv(self):
             self.config.pooling = 'maxpool'
         if not hasattr(self.config, 'head_capacity'):
             raise ValueError("Must have head_capacity")
+        if not hasattr(self.config, 'gqa_score_agg'):
+            self.config.gqa_score_agg = 'mean'
     # max_capacity_prompt --> base_capacity
     # init only once
     if not hasattr(self, "kv_cluster"):
@@ -1423,5 +1463,6 @@ def init_headkv(self):
             max_capacity_prompt = self.config.max_capacity_prompt, 
             kernel_size = self.config.kernel_size,
             pooling = self.config.pooling,
-            head_capacity=self.config.head_capacity
+            head_capacity=self.config.head_capacity,
+            gqa_score_agg = getattr(self.config, 'gqa_score_agg', 'mean'),
             )
