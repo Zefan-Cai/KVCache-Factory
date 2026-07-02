@@ -14,9 +14,19 @@ from transformers.utils import (
     logging,
 )
 from pyramidkv.pyramidkv_utils import init_pyramidkv,init_snapkv,init_CAM,init_H2O,init_StreamingLLM,init_l2norm, init_adakv, init_headkv
+from pyramidkv.pyramidkv_utils import maybe_repeat_kv_before_cache, repeat_kv_to_query_heads
 import math
-from flash_attn import flash_attn_func, flash_attn_varlen_func
-from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input
+try:
+    from flash_attn import flash_attn_func, flash_attn_varlen_func
+    from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input
+    _flash_attn_available = True
+except ImportError:
+    flash_attn_func = None
+    flash_attn_varlen_func = None
+    index_first_axis = None
+    pad_input = None
+    unpad_input = None
+    _flash_attn_available = False
 from pyramidkv.pyramidkv_utils import DynamicCacheSplitHeadFlatten
 
 logger = logging.get_logger(__name__)
@@ -43,6 +53,11 @@ def _flash_attention_forward(
         softmax_scale (`float`, *optional*):
             The scaling of QK^T before applying softmax. Default to 1 / sqrt(head_dim)
     """
+    if not _flash_attn_available:
+        raise RuntimeError(
+            "flash_attn is not installed, but a flash_attention_2 forward was invoked. "
+            "Install flash-attn or load the model with attn_implementation='eager' or 'sdpa'."
+        )
     if not self._flash_attn_uses_top_left_mask:
         causal = self.is_causal
     else:
@@ -155,8 +170,8 @@ def llama_attn_forward_PyramidKV(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -170,6 +185,8 @@ def llama_attn_forward_PyramidKV(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
 
@@ -274,8 +291,8 @@ def llama_sdpa_attn_forward_PyramidKV(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -288,6 +305,8 @@ def llama_sdpa_attn_forward_PyramidKV(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     causal_mask = attention_mask
     if attention_mask is not None:
         causal_mask = causal_mask[:, :, :, : key_states.shape[-2]]
@@ -376,8 +395,8 @@ def llama_flash_attn2_forward_PyramidKV(
 
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
@@ -523,8 +542,8 @@ def llama_attn_forward_L2Norm(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -538,6 +557,8 @@ def llama_attn_forward_L2Norm(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
 
@@ -642,8 +663,8 @@ def llama_sdpa_attn_forward_L2Norm(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -656,6 +677,8 @@ def llama_sdpa_attn_forward_L2Norm(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     causal_mask = attention_mask
     if attention_mask is not None:
         causal_mask = causal_mask[:, :, :, : key_states.shape[-2]]
@@ -744,8 +767,8 @@ def llama_flash_attn2_forward_L2Norm(
 
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
@@ -893,8 +916,8 @@ def llama_attn_forward_CAM(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -908,6 +931,8 @@ def llama_attn_forward_CAM(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
 
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
@@ -1013,8 +1038,8 @@ def llama_sdpa_attn_forward_CAM(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -1027,6 +1052,8 @@ def llama_sdpa_attn_forward_CAM(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
 
     causal_mask = attention_mask
     if attention_mask is not None:
@@ -1117,8 +1144,8 @@ def llama_flash_attn2_forward_CAM(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
@@ -1251,8 +1278,8 @@ def llama_attn_forward_H2O(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -1266,6 +1293,8 @@ def llama_attn_forward_H2O(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
 
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
@@ -1371,8 +1400,8 @@ def llama_sdpa_attn_forward_H2O(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -1385,6 +1414,8 @@ def llama_sdpa_attn_forward_H2O(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
 
     causal_mask = attention_mask
     if attention_mask is not None:
@@ -1475,8 +1506,8 @@ def llama_flash_attn2_forward_H2O(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
@@ -1609,8 +1640,8 @@ def llama_attn_forward_StreamingLLM(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -1624,6 +1655,8 @@ def llama_attn_forward_StreamingLLM(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
 
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
@@ -1729,8 +1762,8 @@ def llama_sdpa_attn_forward_StreamingLLM(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -1743,6 +1776,8 @@ def llama_sdpa_attn_forward_StreamingLLM(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     causal_mask = attention_mask
     if attention_mask is not None:
         causal_mask = causal_mask[:, :, :, : key_states.shape[-2]]
@@ -1832,8 +1867,8 @@ def llama_flash_attn2_forward_StreamingLLM(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
@@ -1966,8 +2001,8 @@ def llama_attn_forward_SnapKV(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -1981,6 +2016,8 @@ def llama_attn_forward_SnapKV(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
 
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
@@ -2086,8 +2123,8 @@ def llama_sdpa_attn_forward_SnapKV(
     else:
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -2100,6 +2137,8 @@ def llama_sdpa_attn_forward_SnapKV(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
 
     causal_mask = attention_mask
     if attention_mask is not None:
@@ -2190,8 +2229,8 @@ def llama_flash_attn2_forward_SnapKV(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models

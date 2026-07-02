@@ -17,13 +17,24 @@ from transformers.utils import (
     is_flash_attn_2_available,
 )
 from pyramidkv.pyramidkv_utils import init_pyramidkv,init_snapkv,init_CAM,init_H2O,init_StreamingLLM,init_l2norm, init_adakv, init_headkv
+from pyramidkv.pyramidkv_utils import maybe_repeat_kv_before_cache, repeat_kv_to_query_heads
 from pyramidkv.pyramidkv_utils import DynamicCacheSplitHeadFlatten
 
-if is_flash_attn_2_available():
+try:
     from flash_attn import flash_attn_func, flash_attn_varlen_func
     from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
     from transformers.modeling_flash_attention_utils import _flash_attention_forward
     _flash_supports_window_size = "window_size" in list(inspect.signature(flash_attn_func).parameters)
+    _flash_attn_available = True
+except ImportError:
+    flash_attn_func = None
+    flash_attn_varlen_func = None
+    index_first_axis = None
+    pad_input = None
+    unpad_input = None
+    _flash_attention_forward = None
+    _flash_supports_window_size = False
+    _flash_attn_available = False
 
 
 logger = logging.get_logger(__name__)
@@ -153,8 +164,8 @@ def mistral_attn_forward_H2O(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
     # repeat k/v heads if n_kv_heads < n_heads
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -167,6 +178,8 @@ def mistral_attn_forward_H2O(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
     kv_cache_len = key_states.shape[-2]
@@ -274,8 +287,8 @@ def mistral_sdpa_attn_forward_H2O(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
     
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -316,6 +329,8 @@ def mistral_sdpa_attn_forward_H2O(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
 
 
@@ -364,6 +379,11 @@ def mistral_flash_attn2_forward_H2O(
     cache_position: Optional[torch.LongTensor] = None,
     **kwargs,
 ):
+    if flash_attn_func is None or _flash_attention_forward is None:
+        raise RuntimeError(
+            "flash_attn is not installed, so the flash_attention_2 forward cannot run. "
+            "Install the `flash-attn` package or load the model with `eager`/`sdpa` attention."
+        )
     if isinstance(past_key_value, StaticCache):
         raise ValueError(
             "`static` cache implementation is not compatible with `attn_implementation==flash_attention_2` "
@@ -419,8 +439,8 @@ def mistral_flash_attn2_forward_H2O(
 
     # repeat k/v heads if n_kv_heads < n_heads
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -574,8 +594,8 @@ def mistral_attn_forward_L2Norm(
     cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
     # repeat k/v heads if n_kv_heads < n_heads
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -588,6 +608,8 @@ def mistral_attn_forward_L2Norm(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
     kv_cache_len = key_states.shape[-2]
@@ -693,8 +715,8 @@ def mistral_sdpa_attn_forward_L2Norm(
     cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
 
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -735,6 +757,8 @@ def mistral_sdpa_attn_forward_L2Norm(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
 
 
@@ -783,6 +807,11 @@ def mistral_flash_attn2_forward_L2Norm(
     use_cache: bool = False,
     **kwargs,
 ):
+    if flash_attn_func is None or _flash_attention_forward is None:
+        raise RuntimeError(
+            "flash_attn is not installed, so the flash_attention_2 forward cannot run. "
+            "Install the `flash-attn` package or load the model with `eager`/`sdpa` attention."
+        )
     # [SnapKV] register kv_cluster
     init_l2norm(self)
     if "padding_mask" in kwargs:
@@ -845,8 +874,8 @@ def mistral_flash_attn2_forward_L2Norm(
         )
     # repeat k/v heads if n_kv_heads < n_heads
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -997,8 +1026,8 @@ def mistral_attn_forward_CAM(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
     # repeat k/v heads if n_kv_heads < n_heads
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -1011,6 +1040,8 @@ def mistral_attn_forward_CAM(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
     kv_cache_len = key_states.shape[-2]
@@ -1118,8 +1149,8 @@ def mistral_sdpa_attn_forward_CAM(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
     
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -1160,6 +1191,8 @@ def mistral_sdpa_attn_forward_CAM(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
 
 
@@ -1208,6 +1241,11 @@ def mistral_flash_attn2_forward_CAM(
     cache_position: Optional[torch.LongTensor] = None,
     **kwargs,
 ):
+    if flash_attn_func is None or _flash_attention_forward is None:
+        raise RuntimeError(
+            "flash_attn is not installed, so the flash_attention_2 forward cannot run. "
+            "Install the `flash-attn` package or load the model with `eager`/`sdpa` attention."
+        )
     if isinstance(past_key_value, StaticCache):
         raise ValueError(
             "`static` cache implementation is not compatible with `attn_implementation==flash_attention_2` "
@@ -1263,8 +1301,8 @@ def mistral_flash_attn2_forward_CAM(
 
     # repeat k/v heads if n_kv_heads < n_heads
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -1417,8 +1455,8 @@ def mistral_attn_forward_StreamingLLM(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
     # repeat k/v heads if n_kv_heads < n_heads
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -1431,6 +1469,8 @@ def mistral_attn_forward_StreamingLLM(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
 
 
@@ -1541,8 +1581,8 @@ def mistral_sdpa_attn_forward_StreamingLLM(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
     
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -1583,6 +1623,8 @@ def mistral_sdpa_attn_forward_StreamingLLM(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
 
 
@@ -1631,6 +1673,11 @@ def mistral_flash_attn2_forward_StreamingLLM(
     cache_position: Optional[torch.LongTensor] = None,
     **kwargs,
 ):
+    if flash_attn_func is None or _flash_attention_forward is None:
+        raise RuntimeError(
+            "flash_attn is not installed, so the flash_attention_2 forward cannot run. "
+            "Install the `flash-attn` package or load the model with `eager`/`sdpa` attention."
+        )
     if isinstance(past_key_value, StaticCache):
         raise ValueError(
             "`static` cache implementation is not compatible with `attn_implementation==flash_attention_2` "
@@ -1686,8 +1733,8 @@ def mistral_flash_attn2_forward_StreamingLLM(
 
     # repeat k/v heads if n_kv_heads < n_heads
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -1841,8 +1888,8 @@ def mistral_attn_forward_PyramidKV(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
     # repeat k/v heads if n_kv_heads < n_heads
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -1855,6 +1902,8 @@ def mistral_attn_forward_PyramidKV(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
     kv_cache_len = key_states.shape[-2]
@@ -1962,8 +2011,8 @@ def mistral_sdpa_attn_forward_PyramidKV(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
     
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -2004,6 +2053,8 @@ def mistral_sdpa_attn_forward_PyramidKV(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
 
 
@@ -2052,6 +2103,11 @@ def mistral_flash_attn2_forward_PyramidKV(
     cache_position: Optional[torch.LongTensor] = None,
     **kwargs,
 ):
+    if flash_attn_func is None or _flash_attention_forward is None:
+        raise RuntimeError(
+            "flash_attn is not installed, so the flash_attention_2 forward cannot run. "
+            "Install the `flash-attn` package or load the model with `eager`/`sdpa` attention."
+        )
     if isinstance(past_key_value, StaticCache):
         raise ValueError(
             "`static` cache implementation is not compatible with `attn_implementation==flash_attention_2` "
@@ -2107,8 +2163,8 @@ def mistral_flash_attn2_forward_PyramidKV(
 
     # repeat k/v heads if n_kv_heads < n_heads
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -2259,8 +2315,8 @@ def mistral_attn_forward_SnapKV(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
     # repeat k/v heads if n_kv_heads < n_heads
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
         cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
@@ -2272,6 +2328,8 @@ def mistral_attn_forward_SnapKV(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
@@ -2380,8 +2438,8 @@ def mistral_sdpa_attn_forward_SnapKV(
     cos, sin = self.rotary_emb(value_states, position_ids)
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
     
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -2422,6 +2480,8 @@ def mistral_sdpa_attn_forward_SnapKV(
             self.kv_seq_len += q_len
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         past_key_value._seen_tokens=self.kv_seq_len
+
+    key_states, value_states = repeat_kv_to_query_heads(key_states, value_states, self.num_heads)
     
 
 
@@ -2470,6 +2530,11 @@ def mistral_flash_attn2_forward_SnapKV(
     cache_position: Optional[torch.LongTensor] = None,
     **kwargs,
 ):
+    if flash_attn_func is None or _flash_attention_forward is None:
+        raise RuntimeError(
+            "flash_attn is not installed, so the flash_attention_2 forward cannot run. "
+            "Install the `flash-attn` package or load the model with `eager`/`sdpa` attention."
+        )
     if isinstance(past_key_value, StaticCache):
         raise ValueError(
             "`static` cache implementation is not compatible with `attn_implementation==flash_attention_2` "
@@ -2525,8 +2590,8 @@ def mistral_flash_attn2_forward_SnapKV(
 
     # repeat k/v heads if n_kv_heads < n_heads
     # [SnapKV] move to ahead
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    key_states, value_states = maybe_repeat_kv_before_cache(
+        self.config, key_states, value_states, self.num_key_value_groups)
 
     if past_key_value is not None:
         # Activate slicing cache only if the config has a value `sliding_windows` attribute

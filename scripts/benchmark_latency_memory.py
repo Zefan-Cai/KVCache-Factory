@@ -64,6 +64,8 @@ def configure_kv_method(model, args):
             config.recent_size = args.recent_size
         if hasattr(args, "pruning_ratio"):
             config.ratio = args.pruning_ratio
+        config.kv_cache_granularity = args.kv_cache_granularity
+        config.gqa_score_agg = args.gqa_score_agg
 
 
 def cuda_stats():
@@ -194,6 +196,8 @@ def parse_args():
     parser.add_argument("--merge", default=None)
     parser.add_argument("--recent_size", type=int, default=32)
     parser.add_argument("--pruning_ratio", type=float, default=0.4)
+    parser.add_argument("--kv_cache_granularity", default="query_head", choices=["query_head", "kv_head"], help="Granularity of the compressed KV cache (see docs/gqa_cache_layout.md).")
+    parser.add_argument("--gqa_score_agg", default="mean", choices=["mean", "max", "sum"], help="Per-KV-head score aggregation when kv_cache_granularity=kv_head.")
     return parser.parse_args()
 
 

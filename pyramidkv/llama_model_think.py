@@ -15,8 +15,17 @@ from transformers.utils import (
 )
 from pyramidkv.pyramidkv_utils import init_pyramidkv,init_snapkv,init_CAM,init_H2O,init_StreamingLLM,init_l2norm, init_adakv, init_headkv
 import math
-from flash_attn import flash_attn_func, flash_attn_varlen_func
-from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input
+try:
+    from flash_attn import flash_attn_func, flash_attn_varlen_func
+    from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input
+    _flash_attn_available = True
+except ImportError:
+    flash_attn_func = None
+    flash_attn_varlen_func = None
+    index_first_axis = None
+    pad_input = None
+    unpad_input = None
+    _flash_attn_available = False
 from pyramidkv.pyramidkv_utils import DynamicCacheSplitHeadFlatten
 
 logger = logging.get_logger(__name__)
@@ -43,6 +52,11 @@ def _flash_attention_forward(
         softmax_scale (`float`, *optional*):
             The scaling of QK^T before applying softmax. Default to 1 / sqrt(head_dim)
     """
+    if not _flash_attn_available:
+        raise RuntimeError(
+            "flash_attn is not installed, but a flash_attention_2 forward was invoked. "
+            "Install flash-attn or load the model with attn_implementation='eager' or 'sdpa'."
+        )
     if not self._flash_attn_uses_top_left_mask:
         causal = self.is_causal
     else:

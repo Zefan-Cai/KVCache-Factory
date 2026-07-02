@@ -76,21 +76,27 @@ benchmark gate, because correctness can only be shown on GPU (LongBench / RULER)
 not by unit tests alone.
 
 1. **Pin current behavior.** Record baseline LongBench/RULER scores and peak KV
-   memory for SnapKV + Llama-3-8B on `main` (blocked today: the MS H100 fleet is
-   fully occupied / the N8 cluster is offline — see the #46 reproduction task).
-2. **Prototype one method, one model.** Add a KV-head-granularity path for
-   `SnapKVCluster` on Llama only, behind an explicit flag
-   (e.g. `--kv_cache_granularity kv_head`, default `query_head`). Implement an
-   explicit group-score reduction (start with `mean`, expose the reduction op)
-   before top-k, and `repeat_kv` at attention-compute time instead of before
-   `update_kv`.
-3. **Prove parity/tradeoff.** Compare against the pinned baseline: expect ~4x
-   lower KV memory and quantify the accuracy delta from group reduction. Keep the
-   flag off by default until the delta is acceptable.
-4. **Generalize.** Only after (3), extend to the other clusters and to Mistral,
-   reusing the same reduction contract. `AdaKV`/`HeadKV` need per-head-budget
-   redesign and should come last.
+   memory for SnapKV + Llama-3-8B on `main`. Status 2026-07-01: baseline
+   LongBench subset run (FullKV/SnapKV/PyramidKV/H2O/StreamingLLM @128,
+   Meta-Llama-3-8B-Instruct, 6 tasks) executing on a Pluto 8xA100-40G node.
+2. **Prototype behind a flag.** DONE (2026-07-01): `--kv_cache_granularity
+   {query_head,kv_head}` (default `query_head`) and `--gqa_score_agg
+   {mean,max,sum}` (default `mean`) landed for SnapKV, PyramidKV, H2O,
+   StreamingLLM, CAM and L2Norm on both Llama and Mistral. Mode is detected
+   inside `update_kv` from query-vs-key head counts; scores are group-reduced
+   before top-k; `repeat_kv` moved to attention-compute time (eager/sdpa) or
+   dropped entirely (flash-attn handles GQA natively). Default-mode outputs are
+   bit-identical to the pre-change code (tests/test_query_head_bitident.py);
+   kv_head invariants and tiny-model generation are covered by
+   tests/test_gqa_kv_head.py and tests/test_gqa_model_integration.py.
+3. **Prove parity/tradeoff.** IN PROGRESS: A/B LongBench subset + peak-memory
+   comparison (`scripts/benchmark_latency_memory.py` now accepts
+   `--kv_cache_granularity`) running on the same node. The flag stays off by
+   default until the accuracy delta is accepted here.
+4. **Generalize.** `AdaKV`/`HeadKV`/`ThinK` still need per-head-budget redesign
+   and remain query-head-granular; `run_longbench.py` rejects
+   `--kv_cache_granularity kv_head` for them at startup.
 
-Until step 1 can run, the query-head-granularity layout stays the default and
-this issue remains open. This matches the maintainer's note on #49 that a correct
-refactor needs a wider audit rather than a risky local change.
+The query-head-granularity layout stays the default. This matches the
+maintainer's note on #49 that a correct refactor needs a wider audit rather
+than a risky local change.
