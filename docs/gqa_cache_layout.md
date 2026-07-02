@@ -75,10 +75,16 @@ Do not change all 40 call sites at once. Land incrementally, each step behind a
 benchmark gate, because correctness can only be shown on GPU (LongBench / RULER),
 not by unit tests alone.
 
-1. **Pin current behavior.** Record baseline LongBench/RULER scores and peak KV
-   memory for SnapKV + Llama-3-8B on `main`. Status 2026-07-01: baseline
-   LongBench subset run (FullKV/SnapKV/PyramidKV/H2O/StreamingLLM @128,
-   Meta-Llama-3-8B-Instruct, 6 tasks) executing on a Pluto 8xA100-40G node.
+1. **Pin current behavior.** DONE (2026-07-02, 8xA100-40G): 6-task LongBench
+   subset (multifieldqa_en/hotpotqa/triviaqa/gov_report/samsum/lcc),
+   Meta-Llama-3-8B-Instruct @128, fp16, flash-attn2, greedy. Pre-fix code
+   (`76b07dc`): FullKV 41.15/45.15/90.56/28.68/42.67/59.38, SnapKV
+   31.30/40.41/89.78/19.88/38.99/59.00, PyramidKV
+   32.90/38.29/89.23/20.29/38.96/57.74. On fixed main (`7855979`, Llama-3
+   stop-token + chat-template fixes from issue #46) the query_head numbers
+   are: FullKV 47.78/47.32/90.56/30.44/42.67/59.38, SnapKV
+   45.08/45.94/89.78/21.01/38.99/59.00, PyramidKV
+   44.57/46.03/89.23/21.02/38.96/57.74.
 2. **Prototype behind a flag.** DONE (2026-07-01): `--kv_cache_granularity
    {query_head,kv_head}` (default `query_head`) and `--gqa_score_agg
    {mean,max,sum}` (default `mean`) landed for SnapKV, PyramidKV, H2O,
@@ -89,10 +95,19 @@ not by unit tests alone.
    bit-identical to the pre-change code (tests/test_query_head_bitident.py);
    kv_head invariants and tiny-model generation are covered by
    tests/test_gqa_kv_head.py and tests/test_gqa_model_integration.py.
-3. **Prove parity/tradeoff.** IN PROGRESS: A/B LongBench subset + peak-memory
-   comparison (`scripts/benchmark_latency_memory.py` now accepts
-   `--kv_cache_granularity`) running on the same node. The flag stays off by
-   default until the accuracy delta is accepted here.
+3. **Prove parity/tradeoff.** DONE (2026-07-02, same setup, `--gqa_score_agg
+   mean`): kv_head vs query_head on the 6-task subset — SnapKV
+   46.10/46.19/90.37/20.11/39.51/59.30 vs 45.08/45.94/89.78/21.01/38.99/59.00
+   (avg +0.3), PyramidKV 44.63/46.36/89.32/20.36/38.20/57.51 vs
+   44.57/46.03/89.23/21.02/38.96/57.74 (wash), StreamingLLM bit-identical
+   (position-based selection is granularity-invariant). Peak memory
+   (`scripts/benchmark_latency_memory.py`, 9k-token prompt, SnapKV,
+   flash-attn2, A100-40G): budget 2048 peak allocated 22.49 -> 21.74 GiB
+   (-748 MiB, the expected 4x shrink of the compressed cache itself); budget
+   128 delta ~48 MiB (prefill activations dominate). Decode slightly faster
+   in kv_head mode (25.6 vs 25.4 tok/s @2048). Accuracy parity accepted; the
+   flag still defaults to `query_head` so published numbers stay
+   reproducible.
 4. **Generalize.** `AdaKV`/`HeadKV`/`ThinK` still need per-head-budget redesign
    and remain query-head-granular; `run_longbench.py` rejects
    `--kv_cache_granularity kv_head` for them at startup.
