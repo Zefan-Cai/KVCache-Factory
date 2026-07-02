@@ -1,3 +1,4 @@
+import os
 import torch
 import time
 import torch.nn.functional as F
@@ -9,6 +10,18 @@ from typing import List
 
 from typing import List, Optional, Tuple
 from transformers.cache_utils import Cache
+
+
+# Per-forward diagnostics (e.g. the selected max_capacity_prompt per cluster)
+# used to fire on every layer of every generate() call, flooding benchmark
+# stdout. Keep them opt-in via KVCACHE_FACTORY_DEBUG=1 so normal runs stay quiet
+# while the info is still available when debugging reproduction issues.
+_KVCACHE_FACTORY_DEBUG = os.environ.get("KVCACHE_FACTORY_DEBUG", "0").lower() not in ("0", "", "false", "no")
+
+
+def _debug_print(*args, **kwargs):
+    if _KVCACHE_FACTORY_DEBUG:
+        print(*args, **kwargs)
 
 def key_pruner_query_driven(kv_states, q_states, recent_size=128, ratio=0.3):
     _, _, seqlen, head_dim = kv_states.shape
@@ -245,7 +258,7 @@ class PyramidKVCluster():
         steps = (max_num - min_num) // (self.num_hidden_layers - 1)
         max_capacity_prompt = max_num - self.layer_idx * steps
         
-        print(f"PyramidKV max_capacity_prompt {max_capacity_prompt}")
+        _debug_print(f"PyramidKV max_capacity_prompt {max_capacity_prompt}")
         if q_len < self.max_capacity_prompt:
             return key_states, value_states
         elif q_len < (self.max_capacity_prompt - self.window_size) * 2:
@@ -340,7 +353,7 @@ class SnapKVCluster():
         assert key_states.shape[-2] == query_states.shape[-2]
         bsz, num_heads, q_len, head_dim = query_states.shape
         
-        print(f"SnapKV max_capacity_prompt {self.max_capacity_prompt}")
+        _debug_print(f"SnapKV max_capacity_prompt {self.max_capacity_prompt}")
         
         if q_len < self.max_capacity_prompt:
             return key_states, value_states
@@ -383,7 +396,7 @@ class SnapKVCluster():
         assert key_states.shape[-2] == query_states.shape[-2]
         bsz, num_heads, q_len, head_dim = query_states.shape
         
-        print(f"SnapKV max_capacity_prompt {self.max_capacity_prompt}")
+        _debug_print(f"SnapKV max_capacity_prompt {self.max_capacity_prompt}")
         
         if q_len < self.max_capacity_prompt:
             return key_states, value_states
@@ -439,7 +452,7 @@ class L2NormCluster():
         assert key_states.shape[-2] == query_states.shape[-2]
         bsz, num_heads, q_len, head_dim = query_states.shape
         
-        print(f"L2Norm max_capacity_prompt {self.max_capacity_prompt}")
+        _debug_print(f"L2Norm max_capacity_prompt {self.max_capacity_prompt}")
         
         if q_len < self.max_capacity_prompt:
             return key_states, value_states
@@ -484,7 +497,7 @@ class CAMKVCluster:
         assert key_states.shape[-2] == query_states.shape[-2]
         bsz, num_heads, q_len, head_dim = query_states.shape
         
-        print(f"CAM max_capacity_prompt {self.max_capacity_prompt}")
+        _debug_print(f"CAM max_capacity_prompt {self.max_capacity_prompt}")
         
         if q_len < self.max_capacity_prompt:
             return key_states, value_states
@@ -567,7 +580,7 @@ class H2OKVCluster():
         assert key_states.shape[-2] == query_states.shape[-2]
         bsz, num_heads, q_len, head_dim = query_states.shape
         
-        print(f"H2O max_capacity_prompt {self.max_capacity_prompt}")
+        _debug_print(f"H2O max_capacity_prompt {self.max_capacity_prompt}")
         
         if q_len < self.max_capacity_prompt:
             return key_states, value_states
@@ -629,7 +642,7 @@ class StreamingLLMKVCluster():
         assert key_states.shape[-2] == query_states.shape[-2]
         bsz, num_heads, q_len, head_dim = query_states.shape
         
-        print(f"StreamingLLM max_capacity_prompt {self.max_capacity_prompt}")
+        _debug_print(f"StreamingLLM max_capacity_prompt {self.max_capacity_prompt}")
         
         if q_len < self.max_capacity_prompt:
             return key_states, value_states

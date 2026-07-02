@@ -2595,15 +2595,7 @@ def _prepare_4d_causal_attention_mask_with_cache_position(
             )
 
     return causal_mask
-def _is_empty_past_key_values(past_key_values):
-    if past_key_values is None:
-        return True
-    key_cache = getattr(past_key_values, "key_cache", None)
-    if key_cache is not None:
-        return len(key_cache) == 0
-    if isinstance(past_key_values, tuple):
-        return len(past_key_values) == 0
-    return False
+from pyramidkv.generation_state import is_empty_past_key_values as _is_empty_past_key_values
 
 
 def prepare_inputs_for_generation_llama_new(

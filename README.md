@@ -169,6 +169,7 @@ python scripts/benchmark_latency_memory.py \
 - Needle-in-a-haystack context files are loaded in sorted order so runs do not depend on filesystem-specific `glob` ordering.
 - The monkey-patched generation path resets per-layer `kv_seq_len` whenever a new empty cache is prepared. This prevents stale sequence-length state from leaking across independent `generate()` calls on the same model instance.
 - The Mistral CAM monkeypatch patches Mistral attention classes directly; it no longer redirects CAM to Llama attention classes.
+- Per-cluster `max_capacity_prompt` diagnostics are silent by default. Set `KVCACHE_FACTORY_DEBUG=1` to print them; leaving it unset keeps benchmark stdout clean so predictions are easy to inspect.
 
 ## Roadmap
 
