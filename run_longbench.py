@@ -228,7 +228,7 @@ def main(args):
         use_llama3_chat = ("llama-3" in model_path or "llama3" in model_path) \
             and args.dataset not in datasets_no_chat
 
-        tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", add_special_tokens=True).to('cuda')
+        tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", add_special_tokens=True).to(model.device)
         batch_input_ids = tokenized_prompts.input_ids
         attention_mask = tokenized_prompts.attention_mask
 
@@ -243,11 +243,11 @@ def main(args):
             # Wrap the already-middle-truncated prompt, matching official LongBench pred.py.
             # add_special_tokens=False avoids a double BOS on top of <|begin_of_text|>.
             prompt = build_chat_llama3(prompt)
-            tokenized_prompts = tokenizer(prompt, padding="longest", return_tensors="pt", add_special_tokens=False).to('cuda')
+            tokenized_prompts = tokenizer(prompt, padding="longest", return_tensors="pt", add_special_tokens=False).to(model.device)
             batch_input_ids = tokenized_prompts.input_ids
             attention_mask = tokenized_prompts.attention_mask
         elif truncated:
-            tokenized_prompts = tokenizer(prompt, padding="longest", return_tensors="pt", add_special_tokens=True).to('cuda')
+            tokenized_prompts = tokenizer(prompt, padding="longest", return_tensors="pt", add_special_tokens=True).to(model.device)
             batch_input_ids = tokenized_prompts.input_ids
             attention_mask = tokenized_prompts.attention_mask
 
