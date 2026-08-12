@@ -157,6 +157,7 @@ def main(args):
     model_path = args.model_path.lower()
 
     
+    model_max_len = None
     for key in model2maxlen:
         if key in model_path:
             model_max_len = model2maxlen[key]
@@ -164,7 +165,14 @@ def main(args):
 
     
     output_max_len = dataset2maxlen[args.dataset]
+
+
+    if model_max_len is None:
+        # If unknown model: fall back to its own context window, leaving headroom for
+        # generation (the hardcoded values above also sit below each model's true max).
+        model_max_len = model.config.max_position_embeddings - output_max_len
     
+
     with open(args.data_file) as fp:
         for line in fp:
             example = json.loads(line)
