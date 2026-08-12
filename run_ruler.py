@@ -127,7 +127,7 @@ def main(args):
         batch_answers = outputs_list[i:i+args.eval_batch_size]
         batch_lengths = length_list[i:i+args.eval_batch_size]
         
-        tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", add_special_tokens=True).to('cuda')
+        tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", add_special_tokens=True).to(model.device)
         batch_input_ids = tokenized_prompts.input_ids
         attention_mask = tokenized_prompts.attention_mask
 
@@ -135,7 +135,7 @@ def main(args):
             half = int(model_max_len/2)
             prompt = tokenizer.decode(batch_input_ids[0][:half], skip_special_tokens=True)+tokenizer.decode(batch_input_ids[0][-half:], skip_special_tokens=True)
             
-            tokenized_prompts = tokenizer(prompt, padding="longest", return_tensors="pt", add_special_tokens=True).to('cuda')
+            tokenized_prompts = tokenizer(prompt, padding="longest", return_tensors="pt", add_special_tokens=True).to(model.device)
             batch_input_ids = tokenized_prompts.input_ids
             attention_mask = tokenized_prompts.attention_mask
 
