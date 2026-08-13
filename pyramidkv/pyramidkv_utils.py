@@ -1418,7 +1418,9 @@ def init_adakv(self):
         if not hasattr(self.config, 'pooling'):
             self.config.pooling = 'maxpool'
         if not hasattr(self.config, 'floor_ratio'):
-            self.config.floor_ratio = 0.2
+            # `run_longbench.py` wires `--floor` onto the config as `floor`, so accept
+            # either name here; the default stays 0.2 when neither is set.
+            self.config.floor_ratio = getattr(self.config, 'floor', 0.2)
         if not hasattr(self.config, 'normalize'):
             self.config.normalize = True
         if not hasattr(self.config, 'gqa_score_agg'):

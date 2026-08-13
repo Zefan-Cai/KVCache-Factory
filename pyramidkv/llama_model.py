@@ -2302,6 +2302,14 @@ def llama_flash_attn2_forward_AdaKV(
     **kwargs,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
     
+    if not _flash_attn_available:
+        raise RuntimeError(
+            "flash_attn is not installed, so the AdaKV flash_attention_2 forward cannot run. "
+            "AdaKV also needs the `tiny_api_cuda` extension from this repo for decoding: "
+            "build it with `cd csrc && python build.py install`. "
+            "AdaKV/HeadKV are only implemented for flash_attention_2 and do not support "
+            "`--attn_implementation sdpa` or `--attn_implementation eager`."
+        )
     init_adakv(self)
     # LlamaFlashAttention2 attention does not support output_attentions
     if "padding_mask" in kwargs:
@@ -2455,6 +2463,14 @@ def llama_flash_attn2_forward_HeadKV(
     **kwargs,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
     
+    if not _flash_attn_available:
+        raise RuntimeError(
+            "flash_attn is not installed, so the HeadKV flash_attention_2 forward cannot run. "
+            "HeadKV also needs the `tiny_api_cuda` extension from this repo for decoding: "
+            "build it with `cd csrc && python build.py install`. "
+            "AdaKV/HeadKV are only implemented for flash_attention_2 and do not support "
+            "`--attn_implementation sdpa` or `--attn_implementation eager`."
+        )
     init_headkv(self)
     # LlamaFlashAttention2 attention does not support output_attentions
     if "padding_mask" in kwargs:

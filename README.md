@@ -83,6 +83,28 @@ pip install -r requirements.txt
 export PYTHONPATH="$PWD:${PYTHONPATH}"
 ```
 
+### Extra setup for `adakv` and `headkv`
+
+`--method adakv` and `--method headkv` need two things beyond `requirements.txt`:
+
+1. **`flash-attn`.** Both methods are implemented only for FlashAttention v2 and must be run with
+   `--attn_implementation flash_attention_2`; `sdpa` and `eager` are not supported and will raise at
+   the first forward pass.
+2. **The `tiny_api_cuda` CUDA extension in `csrc/`.** AdaKV/HeadKV store a variable-length,
+   per-head-flattened KV cache, and appending to it during *decoding* calls
+   `tiny_api_cuda.update_flatten_view`. Prefill works without it, so a missing extension typically
+   surfaces as an `ImportError` only once generation starts.
+
+```bash
+cd csrc
+python build.py install   # installs the `tiny_pkg` pip package, importable as `tiny_api_cuda`
+cd ..
+```
+
+Building requires a CUDA toolkit (`nvcc`) and `ninja`. The build targets SM 80 (A100/A30) by
+default — edit the `arch=compute_80,code=sm_80` flag in `csrc/build.py` for other GPUs. The decode
+path also imports `nvtx`, which is not in `requirements.txt` (`pip install nvtx`).
+
 ## LongBench
 
 Edit `scripts/scripts_longBench/eval.sh` or call `run_longbench.py` directly:
