@@ -2699,6 +2699,14 @@ def mistral_flash_attn2_forward_AdaKV(
     cache_position: Optional[torch.LongTensor] = None,
     **kwargs,
 ):  
+    if flash_attn_func is None or _flash_attention_forward is None:
+        raise RuntimeError(
+            "flash_attn is not installed, so the AdaKV flash_attention_2 forward cannot run. "
+            "AdaKV also needs the `tiny_api_cuda` extension from this repo for decoding: "
+            "build it with `cd csrc && python build.py install`. "
+            "AdaKV/HeadKV are only implemented for flash_attention_2 and do not support "
+            "`--attn_implementation sdpa` or `--attn_implementation eager`."
+        )
     init_adakv(self)
     if "padding_mask" in kwargs:
         warnings.warn(
@@ -2874,6 +2882,14 @@ def mistral_flash_attn2_forward_HeadKV(
     cache_position: Optional[torch.LongTensor] = None,
     **kwargs,
 ):  
+    if flash_attn_func is None or _flash_attention_forward is None:
+        raise RuntimeError(
+            "flash_attn is not installed, so the HeadKV flash_attention_2 forward cannot run. "
+            "HeadKV also needs the `tiny_api_cuda` extension from this repo for decoding: "
+            "build it with `cd csrc && python build.py install`. "
+            "AdaKV/HeadKV are only implemented for flash_attention_2 and do not support "
+            "`--attn_implementation sdpa` or `--attn_implementation eager`."
+        )
     init_headkv(self)
     if "padding_mask" in kwargs:
         warnings.warn(
